@@ -53,6 +53,12 @@ pub fn hid_touchscreen_single_descriptor(width: u16, height: u16) -> Vec<u8> {
     desc
 }
 
-pub fn hid_touchscreen_fill_report(inX: u16, inY: u16) -> [u8; 5] {
-    [0; 5]
+pub fn hid_touchscreen_fill_report(pressing: bool, inX: u16, inY: u16) -> [u8; 5] {
+    [
+        pressing as u8,
+        inX as u8,
+        (inX >> 8) as u8,
+        inY as u8,
+        (inY >> 8) as u8,
+    ]
 }

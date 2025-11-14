@@ -21,6 +21,10 @@ use crate::avcc::avcc::{
     avcc_to_annexb,
     annexb_process_data
 };
+use crate::airplay::sinks::gst_gtk4::{
+    GstSinkData,
+    init_sink,
+};
 
 #[derive(Debug, Clone)]
 pub struct ScreenSession {
@@ -135,139 +139,123 @@ fn sci_to_u64_string(sci_str: &str) -> String {
 fn handle_client(mut stream: TcpStream, shared_secret: Vec<u8>, sci: String) {
     let mut read_counter: u64 = 0;
     let mut nonce: [u8; 8] = [0; 8];
-    let mut child = Command::new("gst-launch-1.0")
-    .args([
-        "fdsrc", "!",
-        "h264parse", "!",
-        "decodebin", "!",
-        "videoconvert", "!",
-        "xvimagesink", "name=video_sink sync=false", // optional: ensures a visible window
-        ])
-        .env("DISPLAY", ":0")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .spawn()
-        .expect("Failed to spawn gst-launch");
-        let mut child_stdin = child.stdin.take().expect("Failed to open stdin");
+    loop {
+        //println!("caught in the loop! [screen]");
+        let mut header_data = [0; 128];
+        let read = match stream.read(&mut header_data) {
+            Ok(r) if r > 0 => r,
+            Ok(_) => continue,
+            Err(e) => {
+                log::error!("Error reading buffer: {}", e);
+                return;
+            }
+        };
+        //println!("caught in the afterread! [screen]");
+        if read < 128 { continue; }
+        let data_length = u32::from_le_bytes(header_data[0..4].try_into().expect("Wtf? Buffer that will go 0..4 is untryable...")) as usize;
+        let mut body_data: Vec<u8> = vec![0; data_length];
+        if let Err(e) = stream.read_exact(&mut body_data) {
+            panic!("Error reading body: {}", e);
+        }    
         
-        loop {
-            //println!("caught in the loop! [screen]");
-            let mut header_data = [0; 128];
-            let read = match stream.read(&mut header_data) {
-                Ok(r) if r > 0 => r,
-                Ok(_) => continue,
-                Err(e) => {
-                    log::error!("Error reading buffer: {}", e);
-                    return;
-                }
-            };
-            //println!("caught in the afterread! [screen]");
-            if read < 128 { continue; }
-            let data_length = u32::from_le_bytes(header_data[0..4].try_into().expect("Wtf? Buffer that will go 0..4 is untryable...")) as usize;
-            let mut body_data: Vec<u8> = vec![0; data_length];
-            if let Err(e) = stream.read_exact(&mut body_data) {
-                panic!("Error reading body: {}", e);
-            }    
-            
-            let mut key = [0u8; 32];
-            let salt_string = sci_to_u64_string(&sci);
-            Hkdf::<Sha512>::new(Some(format!("DataStream-Salt{}", salt_string).as_bytes()), &shared_secret)
-            .expand(b"DataStream-Output-Encryption-Key", &mut key)
-            .expect("HKDF expand failed");
-            
-            // Set nonce from read_counter (LE bytes)
+        let mut key = [0u8; 32];
+        let salt_string = sci_to_u64_string(&sci);
+        Hkdf::<Sha512>::new(Some(format!("DataStream-Salt{}", salt_string).as_bytes()), &shared_secret)
+        .expand(b"DataStream-Output-Encryption-Key", &mut key)
+        .expect("HKDF expand failed");
+        
+        // Set nonce from read_counter (LE bytes)
+        let body_len = u32::from_le_bytes(header_data[0..4].try_into().unwrap());
+        /*println!("nonce: {:x?}", nonce);
+        println!("length: {:x?}",  &header_data[0..4]);
+        println!("header_data: {:x?}", &header_data[..16]);*/ // first 16 bytes for sanity
+        //println!("body_data (first 16 bytes): {:x?}", &body_data[..16]);
+        let mut state_uninit = std::mem::MaybeUninit::<chacha20_poly1305_state>::uninit();
+        let state_ptr = state_uninit.as_mut_ptr();
+        if &header_data[4] == &0u8 {
+            // you keep me waiting, down here, so far below
+            //println!("framedata: {:x?}", chacha20_poly1305_decrypt_all_64x64_nopad(&key, &nonce, &body_data, Some(&header_data)));
             let body_len = u32::from_le_bytes(header_data[0..4].try_into().unwrap());
-            /*println!("nonce: {:x?}", nonce);
-            println!("length: {:x?}",  &header_data[0..4]);
-            println!("header_data: {:x?}", &header_data[..16]);*/ // first 16 bytes for sanity
-            //println!("body_data (first 16 bytes): {:x?}", &body_data[..16]);
-            let mut state_uninit = std::mem::MaybeUninit::<chacha20_poly1305_state>::uninit();
-            let state_ptr = state_uninit.as_mut_ptr();
-            if &header_data[4] == &0u8 {
-                // you keep me waiting, down here, so far below
-                //println!("framedata: {:x?}", chacha20_poly1305_decrypt_all_64x64_nopad(&key, &nonce, &body_data, Some(&header_data)));
-                let body_len = u32::from_le_bytes(header_data[0..4].try_into().unwrap());
-                let body_len_usize = body_len as usize;
-                
-                // Ensure full body is available
-                if body_data.len() < body_len_usize {
-                    log::error!(
-                        "Truncated frame: header says {} bytes, but body_data.len() = {}",
-                        body_len_usize,
-                        body_data.len()
-                    );
-                    continue; // don't call C FFI
-                }
-                
-                // Call the C decryption function
-                unsafe {
-                    let ret = chachadecrypt_64x64(
-                        key.as_ptr(),
-                        nonce.as_mut_ptr(),
-                        header_data.as_ptr() as *const c_void,
-                        body_data.as_mut_ptr() as *mut c_void,
-                        body_len,
-                    );
-                    
-                    if ret != 0 {
-                        log::error!("Decryption failed: OSStatus = {}", ret);
-                        continue; // or handle error
-                    } else {
-                        //println!("Screen frame decrytion successful!");
-                    }
-                    /*if read_counter == 1  {
-                    println!("First video data: {:x?}", body_data);
-                    } else if read_counter == 2  {
-                    println!("Second video data: {:x?}", body_data);
-                    } else if read_counter == 3  {
-                    println!("Third video data: {:x?}", body_data);
-                    }*/
-                    child_stdin.write_all(annexb_process_data(body_data).as_slice()).expect("son...............we cant write to the process......im crine");
-                }
-                //increment_nonce_le  (&mut nonce);
-                read_counter += 1;
-            } else if &header_data[4] == &1u8 {
-                // TO-DO :: Write everything to an interpretor or to filesystem.
-                // Will do filesystem then attempt to start an Annex-B stream 
-                child_stdin.write_all(avcc_to_annexb(body_data).as_slice()).expect("son...............we cant write to the process......im crine");
+            let body_len_usize = body_len as usize;
+            
+            // Ensure full body is available
+            if body_data.len() < body_len_usize {
+                log::error!(
+                    "Truncated frame: header says {} bytes, but body_data.len() = {}",
+                    body_len_usize,
+                    body_data.len()
+                );
+                continue; // don't call C FFI
             }
-            /*unsafe {
-            chacha20_poly1305_init_64x64(state_ptr, key.as_ptr(), nonce.as_ptr());
-            chacha20_poly1305_add_aad(state_ptr, header_data.as_ptr() as *const c_void, header_data.len());
             
-            let mut length: [u8; 4] = header_data[0..4].try_into().expect("Failed to try into length");
-            println!("dec");
-            let body_len = u32::from_le_bytes(length) as usize;
-            let mut len = chacha20_poly1305_decrypt(state_ptr, body_data.as_ptr() as *const c_void, body_len-16, body_data.as_mut_ptr() as *mut c_void);
-            let mut err: i32 = 0;
-            let mut my_num_ptr: *mut i32 = &mut err;
-            println!("ver");
-            len += chacha20_poly1305_verify(state_ptr, body_data[len..].as_mut_ptr() as *mut c_void, body_data[body_len-16..].as_ptr(), my_num_ptr);
-            if err != 0 {
-            println!("Fatal error: {}", err);
+            // Call the C decryption function
+            unsafe {
+                let ret = chachadecrypt_64x64(
+                    key.as_ptr(),
+                    nonce.as_mut_ptr(),
+                    header_data.as_ptr() as *const c_void,
+                    body_data.as_mut_ptr() as *mut c_void,
+                    body_len,
+                );
+                
+                if ret != 0 {
+                    log::error!("Decryption failed: OSStatus = {}", ret);
+                    continue; // or handle error
+                } else {
+                    //println!("Screen frame decrytion successful!");
+                }
+                /*if read_counter == 1  {
+                println!("First video data: {:x?}", body_data);
+                } else if read_counter == 2  {
+                println!("Second video data: {:x?}", body_data);
+                } else if read_counter == 3  {
+                println!("Third video data: {:x?}", body_data);
+                }*/
+                child_stdin.write_all(annexb_process_data(body_data).as_slice()).expect("son...............we cant write to the process......im crine");
             }
-            }*/
-            
-            // Increment nonce exactly like C
+            //increment_nonce_le  (&mut nonce);
+            read_counter += 1;
+        } else if &header_data[4] == &1u8 {
+            // TO-DO :: Write everything to an interpretor or to filesystem.
+            // Will do filesystem then attempt to start an Annex-B stream 
+            child_stdin.write_all(avcc_to_annexb(body_data).as_slice()).expect("son...............we cant write to the process......im crine");
         }
-    }
-    
-    /// Start the TCP listener and spawn threads
-    pub fn init(shared_secret: Vec<u8>, port: String, streamdata: Stream) {
-        let listener = TcpListener::bind(format!("0.0.0.0:{}", port))
-        .expect("Failed to initialize the Screen Stream Receiver");
-        let pool = ThreadPool::new(4);
+        /*unsafe {
+        chacha20_poly1305_init_64x64(state_ptr, key.as_ptr(), nonce.as_ptr());
+        chacha20_poly1305_add_aad(state_ptr, header_data.as_ptr() as *const c_void, header_data.len());
         
-        log::info!("Initialized Screen Stream Receiver");
-        
-        for stream in listener.incoming() {
-            let stream = stream.unwrap();
-            let ss = shared_secret.clone();
-            let sci = streamdata.stream_connection_id.clone();
-            
-            pool.execute(move || {
-                handle_client(stream, ss, sci);
-            });
+        let mut length: [u8; 4] = header_data[0..4].try_into().expect("Failed to try into length");
+        println!("dec");
+        let body_len = u32::from_le_bytes(length) as usize;
+        let mut len = chacha20_poly1305_decrypt(state_ptr, body_data.as_ptr() as *const c_void, body_len-16, body_data.as_mut_ptr() as *mut c_void);
+        let mut err: i32 = 0;
+        let mut my_num_ptr: *mut i32 = &mut err;
+        println!("ver");
+        len += chacha20_poly1305_verify(state_ptr, body_data[len..].as_mut_ptr() as *mut c_void, body_data[body_len-16..].as_ptr(), my_num_ptr);
+        if err != 0 {
+        println!("Fatal error: {}", err);
         }
+        }*/
+        
+        // Increment nonce exactly like C
     }
+}
+
+/// Start the TCP listener and spawn threads
+pub fn init(shared_secret: Vec<u8>, port: String, streamdata: Stream) {
+    let listener = TcpListener::bind(format!("0.0.0.0:{}", port))
+    .expect("Failed to initialize the Screen Stream Receiver");
+    let pool = ThreadPool::new(4);
     
+    log::info!("Initialized Screen Stream Receiver");
+    
+    for stream in listener.incoming() {
+        let stream = stream.unwrap();
+        let ss = shared_secret.clone();
+        let sci = streamdata.stream_connection_id.clone();
+        
+        pool.execute(move || {
+            handle_client(stream, ss, sci);
+        });
+    }
+}
