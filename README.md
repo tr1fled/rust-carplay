@@ -7,8 +7,10 @@
 
 Welcome to the rust-carplay code, there is not much to say other than congrats for getting access, and enjoy
 
-## Running in Linux
+## Running
 
+### Running in linux:
+I previously ran into an issue, turns out that Debian Bookworm (12) ships with GTK 4.8.3, which is not compatible with the gst-gtk4 crate used for the gtk4 sink, if you do not wish to use this sink, you shall remove the dependencies from Cargo.toml and rewrite `screen.rs` to interface with another sink. But, assuming you have a supported GTK version (the compilation will fail if otherwise): 
 1. Install Rust
 2. Clone this repo
 3. Run it!

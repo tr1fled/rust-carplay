@@ -12,7 +12,7 @@ use gtk::prelude::*;
 use gtk::{gdk, gio, glib};
 use gst_app::AppSrc;
 use std::cell::RefCell;
-use std::sync::{Arc};
+use std::sync::{Arc, Mutex};
 
 #[derive(Debug, Clone)]
 pub struct GstSinkData {
@@ -21,65 +21,89 @@ pub struct GstSinkData {
 
 impl GstSinkData {
     pub fn new() -> Self {
-        // recv AnnexB bytestream
-        let caps = gst::Caps::builder("video/x-h264")
-        .field("stream-format", "byte-stream") // <-- AnnexB
-        .field("alignment", "au")
-        .build();
-        
-        let appsrc = gst_app::AppSrc::builder()
-        .caps(&caps)
-        .format(gst::Format::Time)
-        .build();
         Self {
             data_sink: None
         }
     }
 }
 
-fn create_ui(app: &gtk::Application, sinkdata: Arc<GstSinkData>) {
+fn create_ui(app: &gtk::Application, sinkdata: Arc<Mutex<GstSinkData>>) {
     let pipeline = gst::Pipeline::new();
     
-    let overlay = gst::ElementFactory::make("clockoverlay")
-    .property("font-desc", "Monospace 42")
-    .build()
-    .unwrap();
-    
-    let h264parse = gst::ElementFactory::make("h264parse")
-    .build()
-    .unwrap();
-    
-    let gtksink = gst::ElementFactory::make("gtk4paintablesink")
-    .build()
-    .unwrap();
+    let h264parse = gst::ElementFactory::make("h264parse").build().unwrap();
+    let decoder   = gst::ElementFactory::make("decodebin").build().unwrap();
+    let convert   = gst::ElementFactory::make("videoconvert").build().unwrap();
+    let gtksink   = gst::ElementFactory::make("gtk4paintablesink").build().unwrap();
+    let queue = gst::ElementFactory::make("queue").build().unwrap();
     
     let paintable = gtksink.property::<gdk::Paintable>("paintable");
     //appsrc.push_buffer(Buffer::from_slice(slice));
     
-    // TODO: future plans to provide a bin-like element that works with less setup
-    let src = sinkdata.data_sink;
-    let sink = gst::Bin::default();
-    let convert = gst::ElementFactory::make("videoconvert").build().unwrap();
-    
-    sink.add(&convert).unwrap();
-    sink.add(&gtksink).unwrap();
-    convert.link(&gtksink).unwrap();
-    
-    sink.add_pad(&gst::GhostPad::with_target(&convert.static_pad("sink").unwrap()).unwrap())
-    .unwrap();
-    
-    pipeline.add_many([src.upcast_ref(), &overlay, &sink.upcast_ref()]).unwrap();
-    let caps = gst_video::VideoCapsBuilder::new()
+    {
+        let guard = sinkdata.lock().unwrap();
+        let src = guard.data_sink.as_ref().expect("shouldn't be none");
+        
+        let caps = gst::Caps::builder("video/x-h264")
+        .field("stream-format", "byte-stream")   // annex-b
+        .field("alignment", "au")                // important
+        .build();
+        src.set_caps(Some(&caps));
+        
+        pipeline
+        .add_many([src.upcast_ref(), &queue, &h264parse, &decoder, &convert, &gtksink])
+        .unwrap();
+        
+        // Static links (OK)
+        src.link(&queue).unwrap();
+        queue.link(&h264parse).unwrap();
+        h264parse.link(&decoder).unwrap();
+        
+        // ❗ DO NOT link decodebin statically
+        // decoder.link(&convert).unwrap();   // REMOVE THIS
+        
+        let convert_clone = convert.clone();
+        
+        decoder.connect_pad_added(move |dbin, src_pad| {
+            println!("decodebin added pad {:?}", src_pad);
+            
+            // Get the sink pad from videoconvert
+            let sink_pad = match convert_clone.static_pad("sink") {
+                Some(p) => p,
+                None => {
+                    eprintln!("videoconvert has no sink pad!");
+                    return;
+                },
+            };
+            
+            if sink_pad.is_linked() {
+                println!("sink pad already linked");
+                return;
+            }
+            
+            // Try linking dynamic decodebin pad to videoconvert
+            match src_pad.link(&sink_pad) {
+                Ok(_) => println!("Linked decodebin → videoconvert"),
+                Err(err) => eprintln!("Failed to link decodebin src pad: {:?}", err),
+            }
+        });
+        
+        // Now link convert → gtksink
+        convert.link(&gtksink).unwrap();
+    }
+    /*let caps = gst_video::VideoCapsBuilder::new()
     .width(640)
     .height(480)
     .any_features()
     .build();
+    {
+    let guard = sinkdata.lock().unwrap();
+    let src = guard.data_sink.as_ref().expect("shouldn't be none");
+    src.link_filtered(&h264parse, &caps).unwrap();
+    }*/
     
-    src.link_filtered(&overlay, &caps).unwrap();
-    overlay.link(&sink).unwrap();
     
     let window = gtk::ApplicationWindow::new(app);
-    window.set_default_size(640, 480);
+    window.set_default_size(1920, 1080);
     
     let vbox = gtk::Box::new(gtk::Orientation::Vertical, 0);
     
@@ -107,6 +131,7 @@ fn create_ui(app: &gtk::Application, sinkdata: Arc<GstSinkData>) {
     
     let bus = pipeline.bus().unwrap();
     
+    println!("PIPELINE HAS BEEN INIT! PIPELINE HAS BEEN INIT! PIPELINE HAS BEEN INIT! PIPELINE HAS BEEN INIT! PIPELINE HAS BEEN INIT! PIPELINE HAS BEEN INIT! ");
     pipeline
     .set_state(gst::State::Playing)
     .expect("Unable to set the pipeline to the `Playing` state");
@@ -157,31 +182,16 @@ fn create_ui(app: &gtk::Application, sinkdata: Arc<GstSinkData>) {
     });
 }
 
-pub fn init_sink(some_data: Arc<GstSinkData>) -> glib::ExitCode {
-    gst::init().unwrap();
+pub fn init_sink(some_data: Arc<Mutex<GstSinkData>>) -> glib::ExitCode {
     gtk::init().unwrap();
-    
     gstgtk4::plugin_register_static().expect("Failed to register gstgtk4 plugin");
     
     let app = gtk::Application::new(None::<&str>, gio::ApplicationFlags::FLAGS_NONE);
-
-    // init appsrc
-    { 
-        let caps = gst::Caps::builder("video/x-h264")
-            .field("stream-format", "byte-stream") // <-- AnnexB
-            .field("alignment", "au")
-            .build();
-        let mut data = some_data.lock().unwrap();
-        data.data_sink = Some(gst_app::AppSrc::builder()
-            .caps(&caps)
-            .format(gst::Format::Time)
-            .build());
-    }
-
+    
     // init ui
     app.connect_activate(move |app| {
         // call create_ui with the extra argument
-        create_ui(app, some_data);
+        create_ui(app, some_data.clone());
     });
     let res = app.run();
     

@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex};
 use std::str::Lines;
 use chacha20poly1305::aead::AeadMutInPlace;
 use log;
+use crate::airplay::sinks::gst_gtk4::{GstSinkData, init_sink};
 use crate::parsing::http::{
     self,
     HttpRequest,
@@ -20,7 +21,7 @@ use crate::networking::{
         setup::handle_setup,
     },
 };
-use std::ptr;
+use std::{ptr, thread};
 use threadpool::ThreadPool;
 use chacha20poly1305::{ChaCha20Poly1305, Key, Nonce, KeyInit, aead::{Aead, Payload, Tag, generic_array::GenericArray}};
 use byteorder::{ByteOrder, LittleEndian};
@@ -82,6 +83,29 @@ pub fn encrypt_chunk(write_key: &[u8; 32], data: &[u8], count: &mut u64) -> Resu
 fn handle_client(mut stream: TcpStream) {
     let mut pair_session: Session = Session::new();
     let mut airplay_session = Arc::new(Mutex::new(AirplaySession::new()));
+    let mut sinkdata = Arc::new(Mutex::new(GstSinkData::new()));
+    {
+        let mut aps = airplay_session.lock().unwrap();
+        let sdc = sinkdata.clone();
+        aps.sink = Some(sdc);
+    }
+    let mut csd = sinkdata.clone();
+    gst::init().unwrap();
+    // right after gst is initialized, we will define the appsrc
+    { 
+        let caps = gst::Caps::builder("video/x-h264")
+        .field("stream-format", "byte-stream") // <-- AnnexB
+        .field("alignment", "nal")
+        .build();
+        let mut data = csd.lock().unwrap();
+        data.data_sink = Some(gst_app::AppSrc::builder()
+        .caps(&caps)
+        .format(gst::Format::Time)
+        .build());
+    }
+    thread::spawn(move || {
+        init_sink(csd)
+    });
     match stream.peer_addr() {
         Ok(peer_ip) => {
             let mut pip = String::new();
@@ -169,7 +193,7 @@ fn handle_client(mut stream: TcpStream) {
                 "/auth-setup" => {
                     response_data = handle_auth_setup(request_data, &mut pair_session)
                 },
-
+                
                 "/info" => {
                     response_data = handle_info(request_data, &mut pair_session)
                 }

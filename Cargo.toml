@@ -27,7 +27,7 @@ byteorder = "1.5.0"
 plist = "1.8.0"
 serde = { version = "1.0.228", features = ["derive"] }
 gst = { package = "gstreamer", version = "0.24.3", features = ["v1_22"] }
-#gst-plugin-gtk4 = "0.14.3"
+gst-plugin-gtk4 = "0.14.3"
 gst_video = { package = "gstreamer-video", version = "0.24.3", features = ["v1_22"] }
 gst_app = {package = "gstreamer-app", version = "0.24.2"}
 gtk = { version = "0.10.2", package = "gtk4" }

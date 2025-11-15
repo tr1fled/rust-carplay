@@ -4,9 +4,12 @@ use std::os::raw::c_void;
 use threadpool::ThreadPool;
 use sha2::Sha512;
 use hkdf::Hkdf;
-use std::io::Write;
+use std::io::{Write};
+use std::sync::{Arc, Mutex};
 use std::process::{Command, Stdio};
 use std::io::prelude::*; // Import the Write trait
+use std::thread;
+use gst::Buffer;
 use crate::airplay::airplay_session::Stream;
 use crate::networking::http_responders::pair_setup::chacha20_poly1305_decrypt_all_64x64_nopad;
 use crate::chachacryptor::bindings::chachadecrypt_64x64;
@@ -136,7 +139,7 @@ fn sci_to_u64_string(sci_str: &str) -> String {
 }
 
 /// Handle a single TCP client
-fn handle_client(mut stream: TcpStream, shared_secret: Vec<u8>, sci: String) {
+fn handle_client(mut stream: TcpStream, shared_secret: Vec<u8>, sci: String, sinkdata: Arc<Mutex<GstSinkData>>) {
     let mut read_counter: u64 = 0;
     let mut nonce: [u8; 8] = [0; 8];
     loop {
@@ -211,14 +214,36 @@ fn handle_client(mut stream: TcpStream, shared_secret: Vec<u8>, sci: String) {
                 } else if read_counter == 3  {
                 println!("Third video data: {:x?}", body_data);
                 }*/
-                child_stdin.write_all(annexb_process_data(body_data).as_slice()).expect("son...............we cant write to the process......im crine");
+                {
+                    // Extract AppSrc outside of the mutex
+                    let ds = {
+                        let sd = sinkdata.lock().unwrap();
+                        sd.data_sink.clone().expect("APPSRC IS NONE! FAIL!")
+                    };
+                    
+                    // Now safe to push
+                    let apd = annexb_process_data(body_data);
+                    let buf = Buffer::from_slice(apd);// used to be apd
+                    println!("{:?}", ds.push_buffer(buf));
+                }
             }
             //increment_nonce_le  (&mut nonce);
             read_counter += 1;
         } else if &header_data[4] == &1u8 {
             // TO-DO :: Write everything to an interpretor or to filesystem.
             // Will do filesystem then attempt to start an Annex-B stream 
-            child_stdin.write_all(avcc_to_annexb(body_data).as_slice()).expect("son...............we cant write to the process......im crine");
+            {
+                // Extract AppSrc outside of the mutex
+                let ds = {
+                    let sd = sinkdata.lock().unwrap();
+                    sd.data_sink.clone().expect("APPSRC IS NONE! FAIL!")
+                };
+                
+                // Now safe to push
+                let apd = avcc_to_annexb(body_data);
+                let buf = Buffer::from_slice(apd);
+                println!("{:?}", ds.push_buffer(buf));
+            }
         }
         /*unsafe {
         chacha20_poly1305_init_64x64(state_ptr, key.as_ptr(), nonce.as_ptr());
@@ -242,7 +267,7 @@ fn handle_client(mut stream: TcpStream, shared_secret: Vec<u8>, sci: String) {
 }
 
 /// Start the TCP listener and spawn threads
-pub fn init(shared_secret: Vec<u8>, port: String, streamdata: Stream) {
+pub fn init(shared_secret: Vec<u8>, port: String, streamdata: Stream, sinkdata: Arc<Mutex<GstSinkData>>) {
     let listener = TcpListener::bind(format!("0.0.0.0:{}", port))
     .expect("Failed to initialize the Screen Stream Receiver");
     let pool = ThreadPool::new(4);
@@ -253,9 +278,9 @@ pub fn init(shared_secret: Vec<u8>, port: String, streamdata: Stream) {
         let stream = stream.unwrap();
         let ss = shared_secret.clone();
         let sci = streamdata.stream_connection_id.clone();
-        
+        let mut sd = sinkdata.clone();
         pool.execute(move || {
-            handle_client(stream, ss, sci);
+            handle_client(stream, ss, sci, sd);
         });
     }
 }

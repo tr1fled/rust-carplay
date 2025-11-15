@@ -4,6 +4,7 @@ use std::net::{TcpListener, TcpStream};
 use threadpool::ThreadPool;
 use plist::Value;
 use std::thread;
+use crate::airplay::sinks::gst_gtk4::{GstSinkData, init_sink};
 use crate::airplay::stream_processors::screen;
 use crate::networking::http_responders::pair_setup::Session;
 use crate::networking::http_server::{decrypt_chunk, encrypt_chunk};
@@ -56,6 +57,9 @@ pub struct AirplaySession {
     
     // Stream data
     pub streams: Vec<Stream>,
+    
+    // sink (oh fck me)
+    pub sink: Option<Arc<Mutex<GstSinkData>>>,
 }
 impl AirplaySession {
     pub fn new() -> Self {
@@ -76,6 +80,9 @@ impl AirplaySession {
             
             // Stream data
             streams: Vec::new(),
+
+            // sink
+            sink: None,
         }
     }
     /*pub fn new(session_uuid: String, pn: String, pmac: String, pid: String, ptp: u32) -> Self {
@@ -200,11 +207,14 @@ pub fn process_streams(streams: Vec<Stream>, airplay_session: &Arc<Mutex<Airplay
             // Main Screen // TCP // 110
             110 => {
                 let ss = shared_secret.clone();
+                let aps = airplay_session.lock().unwrap();
+                let sinkdata = aps.sink.as_ref().unwrap();
+                let mut sdc = sinkdata.clone();
                 thread::Builder::new()
                 .name("screen-recv-server".to_string()) // Set the desired name for the thread
                 .spawn(|| {
                     // This is the code that will run in the new thread
-                    screen::init(ss, 7777.to_string(), stream)
+                    screen::init(ss, 7777.to_string(), stream, sdc)
                 })
                 .expect("Failed to spawn thread");
                 end_stream_data.streams.push(StreamResponse {
