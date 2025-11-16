@@ -77,11 +77,12 @@ pub fn handle_setup(request_data: &mut HttpRequest, pair_session: &mut Session, 
             airplay::timing_server::init(ps, aps, clock_wrapper);
         });
         let ps = pair_session.clone();
+        let aps = Arc::clone(&airplay_session);
         thread::Builder::new()
         .name("airplay_session_init".to_string()) // Set the desired name for the thread
         .spawn(|| {
             // This is the code that will run in the new thread
-            airplay::airplay_session::init(ps);
+            airplay::airplay_session::init(ps, aps);
         });
     } else {
         println!("Now we have streams to process, sending them to the stream processor...");

@@ -103,8 +103,9 @@ fn handle_client(mut stream: TcpStream) {
         .format(gst::Format::Time)
         .build());
     }
+    let aps = airplay_session.clone();
     thread::spawn(move || {
-        init_sink(csd)
+        init_sink(aps)
     });
     match stream.peer_addr() {
         Ok(peer_ip) => {
@@ -113,7 +114,8 @@ fn handle_client(mut stream: TcpStream) {
                 Some((ip, _)) => pip=ip.to_string(),
                 None => panic!("Failed to split IP")
             };
-            airplay_session.lock().unwrap().peer_ip = pip
+            airplay_session.lock().unwrap().peer_ip = pip.clone();
+            sinkdata.lock().unwrap().peer_ip = pip.clone();
         },
         Err(error) => panic!("[FIXED LATER (FIXME)] Failed to get the peer's IP address. The server cannot live on unless fixed: {}", error)
     }

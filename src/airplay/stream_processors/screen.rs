@@ -1,16 +1,14 @@
 use std::io::Read;
 use std::net::{TcpListener, TcpStream};
 use std::os::raw::c_void;
+use gst_app::AppSrc;
 use threadpool::ThreadPool;
 use sha2::Sha512;
 use hkdf::Hkdf;
 use std::io::{Write};
 use std::sync::{Arc, Mutex};
-use std::process::{Command, Stdio};
-use std::io::prelude::*; // Import the Write trait
-use std::thread;
 use gst::Buffer;
-use crate::airplay::airplay_session::Stream;
+use crate::airplay::airplay_session::{AirplaySession, Stream};
 use crate::networking::http_responders::pair_setup::chacha20_poly1305_decrypt_all_64x64_nopad;
 use crate::chachacryptor::bindings::chachadecrypt_64x64;
 use crate::cc20p1305::bindings::{
@@ -23,10 +21,6 @@ use crate::cc20p1305::bindings::{
 use crate::avcc::avcc::{
     avcc_to_annexb,
     annexb_process_data
-};
-use crate::airplay::sinks::gst_gtk4::{
-    GstSinkData,
-    init_sink,
 };
 
 #[derive(Debug, Clone)]
@@ -139,9 +133,17 @@ fn sci_to_u64_string(sci_str: &str) -> String {
 }
 
 /// Handle a single TCP client
-fn handle_client(mut stream: TcpStream, shared_secret: Vec<u8>, sci: String, sinkdata: Arc<Mutex<GstSinkData>>) {
+fn handle_client(mut stream: TcpStream, shared_secret: Vec<u8>, sci: String, airplay_session: Arc<Mutex<AirplaySession>>) {
     let mut read_counter: u64 = 0;
     let mut nonce: [u8; 8] = [0; 8];
+    let mut sinkdata: Arc<Mutex<crate::airplay::sinks::gst_gtk4::GstSinkData>>;
+    {
+        sinkdata = airplay_session.lock().unwrap().sink.as_ref().expect("Should be some, but is none? Fatal failure.").clone();
+    }
+    let mut ds: AppSrc =  {
+        let sd = sinkdata.lock().unwrap();
+        sd.data_sink.clone().expect("APPSRC IS NONE! FAIL!")
+    };
     loop {
         //println!("caught in the loop! [screen]");
         let mut header_data = [0; 128];
@@ -215,59 +217,30 @@ fn handle_client(mut stream: TcpStream, shared_secret: Vec<u8>, sci: String, sin
                 println!("Third video data: {:x?}", body_data);
                 }*/
                 {
-                    // Extract AppSrc outside of the mutex
-                    let ds = {
-                        let sd = sinkdata.lock().unwrap();
-                        sd.data_sink.clone().expect("APPSRC IS NONE! FAIL!")
-                    };
+                    let sinkdata = airplay_session.lock().unwrap().sink.as_ref().expect("Should be some, but is none? Fatal failure.").clone();
                     
                     // Now safe to push
                     let apd = annexb_process_data(body_data);
                     let buf = Buffer::from_slice(apd);// used to be apd
-                    println!("{:?}", ds.push_buffer(buf));
+                    ds.push_buffer(buf);
                 }
             }
-            //increment_nonce_le  (&mut nonce);
             read_counter += 1;
         } else if &header_data[4] == &1u8 {
             // TO-DO :: Write everything to an interpretor or to filesystem.
             // Will do filesystem then attempt to start an Annex-B stream 
-            {
-                // Extract AppSrc outside of the mutex
-                let ds = {
-                    let sd = sinkdata.lock().unwrap();
-                    sd.data_sink.clone().expect("APPSRC IS NONE! FAIL!")
-                };
-                
+            {   
                 // Now safe to push
                 let apd = avcc_to_annexb(body_data);
                 let buf = Buffer::from_slice(apd);
                 println!("{:?}", ds.push_buffer(buf));
             }
         }
-        /*unsafe {
-        chacha20_poly1305_init_64x64(state_ptr, key.as_ptr(), nonce.as_ptr());
-        chacha20_poly1305_add_aad(state_ptr, header_data.as_ptr() as *const c_void, header_data.len());
-        
-        let mut length: [u8; 4] = header_data[0..4].try_into().expect("Failed to try into length");
-        println!("dec");
-        let body_len = u32::from_le_bytes(length) as usize;
-        let mut len = chacha20_poly1305_decrypt(state_ptr, body_data.as_ptr() as *const c_void, body_len-16, body_data.as_mut_ptr() as *mut c_void);
-        let mut err: i32 = 0;
-        let mut my_num_ptr: *mut i32 = &mut err;
-        println!("ver");
-        len += chacha20_poly1305_verify(state_ptr, body_data[len..].as_mut_ptr() as *mut c_void, body_data[body_len-16..].as_ptr(), my_num_ptr);
-        if err != 0 {
-        println!("Fatal error: {}", err);
-        }
-        }*/
-        
-        // Increment nonce exactly like C
     }
 }
 
 /// Start the TCP listener and spawn threads
-pub fn init(shared_secret: Vec<u8>, port: String, streamdata: Stream, sinkdata: Arc<Mutex<GstSinkData>>) {
+pub fn init(shared_secret: Vec<u8>, port: String, streamdata: Stream, airplay_session: Arc<Mutex<AirplaySession>>) {
     let listener = TcpListener::bind(format!("0.0.0.0:{}", port))
     .expect("Failed to initialize the Screen Stream Receiver");
     let pool = ThreadPool::new(4);
@@ -278,9 +251,9 @@ pub fn init(shared_secret: Vec<u8>, port: String, streamdata: Stream, sinkdata: 
         let stream = stream.unwrap();
         let ss = shared_secret.clone();
         let sci = streamdata.stream_connection_id.clone();
-        let mut sd = sinkdata.clone();
+        let aps = airplay_session.clone();
         pool.execute(move || {
-            handle_client(stream, ss, sci, sd);
+            handle_client(stream, ss, sci, aps);
         });
     }
 }

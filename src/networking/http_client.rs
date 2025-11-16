@@ -7,7 +7,7 @@ pub fn control_command(ip: String, host: String) -> io::Result<()> {
     log::debug!("Connected to the server!");
 
     // Message to send to the server
-    let message = format!("GET /ctrl-int/1/connect HTTP/1.1\nHost: {}\nAirPlay-Receiver-Device-ID: 242606374384606\r\n\r\n", host);
+    let message = format!("GET /ctrl-int/1/connect HTTP/1.1\nAirPlay-Receiver-Device-ID: 242606374384606\r\n\r\n");
     println!("{}", message);
     
     // Write the message as bytes to the stream
@@ -26,13 +26,14 @@ pub fn control_command(ip: String, host: String) -> io::Result<()> {
     Ok(())
 }
 
-pub fn send_command(ip: String, host: String, bplist: Vec<u8>) -> io::Result<()> {
+pub fn send_command(ip: String, bplist: Vec<u8>) -> io::Result<()> {
     // Connect to the server at 127.0.0.1:8080
-    let mut stream = TcpStream::connect(ip)?;
+    // provisional
+    let mut stream = TcpStream::connect(format!("{}:5000", ip))?;
     log::debug!("Connected to the server!");
 
     // Message to send to the server
-    let message = format!("POST /command RTSP/1.0\nHost: {}\nAirPlay-Receiver-Device-ID: 242606374384606\nContent-Type: application/x-apple-binary-plist\nContent-Length: {}\r\n\r\n", host, bplist.len());
+    let message = format!("POST /command RTSP/1.0\nAirPlay-Receiver-Device-ID: 242606374384606\nContent-Type: application/x-apple-binary-plist\nContent-Length: {}\r\n\r\n", bplist.len());
     // Write the message as bytes to the stream
     stream.write_all(message.as_bytes())?;
     stream.write_all(&bplist.as_slice())?;
@@ -45,7 +46,7 @@ pub fn send_command(ip: String, host: String, bplist: Vec<u8>) -> io::Result<()>
     
     // Convert the received bytes to a string and print it
     let response = String::from_utf8_lossy(&buffer[..bytes_read]);
-    log::debug!("Received: {}", response);
+    println!("Received: {}", response);
 
     Ok(())
 }
