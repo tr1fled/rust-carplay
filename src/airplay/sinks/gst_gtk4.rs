@@ -7,20 +7,31 @@
 
 // and so we rewrite the GTK4 sink to be more complex
 // but to have wider compatibility
+use std::{
+    thread,
+    time::Duration,
+};
 use gst::{Buffer, prelude::*};
 use gtk::prelude::*;
 use std::sync::mpsc::Sender;
-use gtk::{gdk, gio, glib, GestureClick, EventControllerMotion};
+use gtk::{Button, ApplicationWindow, Box, Orientation, gdk, gio, glib, GestureClick, EventControllerMotion};
 use std::rc::Rc;
 use std::cell::Cell;
 use gst_app::AppSrc;
 use std::cell::RefCell;
 use std::sync::{Arc, Mutex};
 use gstgtk4::RenderWidget;
+use serde::Serialize;
 
 use crate::HID::touchscreen::hid_touchscreen_fill_report;
 use crate::airplay::airplay_session::{AirplaySession, EventSessionMessage};
 use crate::networking::http_client::send_command;
+
+#[derive(Serialize)]
+pub struct SetNightMode {
+    pub r#type: String,
+    pub nightMode: bool,
+}
 
 #[derive(Debug, Clone)]
 pub struct GstSinkData {
@@ -42,6 +53,15 @@ impl GstSinkData {
         Self {
             data_sink: None,
             peer_ip: String::new()
+        }
+    }
+}
+
+impl SetNightMode {
+    pub fn new(nightMode: bool) -> Self {
+        Self {
+            r#type: String::from("setNightMode"),
+            nightMode: false,
         }
     }
 }
@@ -93,7 +113,6 @@ fn setup_mouse_handlers(widget: &RenderWidget, transmitter: Sender<EventSessionM
                 content_type: "application/x-apple-binary-plist".into(),
                 data: hid_touchscreen_fill_report(false, x as u16, y as u16),
             });
-            println!("Mouse UP at {x}, {y}");
             // your code here (end drag, etc.)
         });
     }
@@ -110,7 +129,6 @@ fn setup_mouse_handlers(widget: &RenderWidget, transmitter: Sender<EventSessionM
         
         motion.connect_motion(move |_motion, x, y| {
             if mouse_down.get() {
-                println!("Mouse MOVE (while down) at {x}, {y}");
                 *tx.latest.borrow_mut() = Some(EventSessionMessage {
                     content_type: "application/x-apple-binary-plist".into(),
                     data: hid_touchscreen_fill_report(true, x as u16, y as u16),
@@ -192,15 +210,18 @@ fn create_ui(app: &gtk::Application, airplay_session: Arc<Mutex<AirplaySession>>
     }
     
     let window = gtk::ApplicationWindow::new(app);
-    window.set_default_size(1920, 1080);
+    window.set_default_size(1280, 720);
     
     let vbox = gtk::Box::new(gtk::Orientation::Vertical, 0);
     
     let gst_widget = gstgtk4::RenderWidget::new(&gtksink);
-    {
-        let ip = airplay_session.lock().unwrap().event_channel.as_ref().expect("Sender is not there!").clone();
-        setup_mouse_handlers(&gst_widget, ip);
-    }
+    let tx = loop {
+        match airplay_session.lock().unwrap().event_channel.as_ref() {
+            Some(ec) => break ec.clone(),
+            None => {thread::sleep(Duration::from_millis(200)); continue;},
+        }
+    };
+    setup_mouse_handlers(&gst_widget, tx.clone());
     vbox.append(&gst_widget);
     
     window.set_child(Some(&vbox));
@@ -266,6 +287,64 @@ fn create_ui(app: &gtk::Application, airplay_session: Arc<Mutex<AirplaySession>>
             timeout_id.remove();
         }
     });
+    
+    // events
+    // Create a button with label and margins
+    let button = Button::builder()
+    .label("🌓 Day/Night mode")
+    .margin_top(10)
+    .margin_bottom(10)
+    .margin_start(12)
+    .margin_end(12)
+    .build();
+    let button2 = Button::builder()
+    .label("Open Siri")
+    .margin_top(10)
+    .margin_bottom(10)
+    .margin_start(12)
+    .margin_end(12)
+    .build();
+    
+    // Connect to "clicked" signal of `button`
+    let night_mode = Rc::new(RefCell::new(false));
+    let night_mode_clone = night_mode.clone();
+    let txc = tx.clone();
+    button.connect_clicked(move |_| {
+        let value = *night_mode_clone.borrow();
+        
+        let mut dta = Vec::new();
+        plist::to_writer_binary(&mut dta, &SetNightMode::new(value));
+        
+        txc.send(EventSessionMessage {
+            content_type: "application/x-apple-binary-plist".into(),
+            data: dta,
+        }).unwrap();
+        
+        *night_mode_clone.borrow_mut() = !value;
+    });
+    button2.connect_clicked(|button| {
+        // Set the label to "Hello World!" after the button has been clicked on
+        button.set_label("Hello World!");
+    });
+    
+    // Create a window
+    let window2 = ApplicationWindow::builder()
+    .application(app)
+    .title("My GTK App")
+    .build();
+    
+    let vbox2 = Box::builder()
+    .orientation(Orientation::Vertical)
+    .spacing(10) // Optional: Add spacing between widgets
+    .build();
+    
+    vbox2.append(&button);
+    vbox2.append(&button2);
+    window2.set_child(Some(&vbox2));
+    
+    // Present window
+    window2.present();
+    app.add_window(&window2);
 }
 
 pub fn init_sink(some_data: Arc<Mutex<AirplaySession>>) -> glib::ExitCode {

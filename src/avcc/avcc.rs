@@ -1,3 +1,10 @@
+/// Convert an AVCConfiguration record to an AnnexB formatted one
+/// 
+/// # Arguments
+/// * `in_avcc` - `Vec<u8>` containing the AVCConfiguration record, given to the screen receiver as opcode 1.
+/// 
+/// # Returns
+/// * `out_annexb` - Vec<u8> containing the configuration record converted to AnnexB format.
 pub fn avcc_to_annexb(in_avcc: Vec<u8>) -> Vec<u8> {
     // AVCC Format is documented in ISO/IEC STANDARD 14496-15 (AVC file format) section 5.2.4.1.1.
     //
@@ -72,9 +79,17 @@ pub fn avcc_to_annexb(in_avcc: Vec<u8>) -> Vec<u8> {
     dst
 }
 
-pub fn annexb_process_data(data: Vec<u8>) -> Vec<u8> {
-    let mut out = Vec::new();
+/// Convert a length prefixed NAL unit to one with an AnnexB start code
+/// 
+/// # Arguments
+/// * `in_avc` - `Vec<u8>` containing the length-prefixed NALu
+/// 
+/// # Returns
+/// * `out_annexb` - `Vec<u8>` with an AnnexB start code (00, 00, 00, 01)
+pub fn avc_to_annexb(in_avc: Vec<u8>) -> Vec<u8> {
+    let mut out_annexb = Vec::new();
     let mut i = 0;
+    let mut data = in_avc;
 
     while i + 4 <= data.len() {
         // Read 4-byte length (big-endian)
@@ -87,14 +102,14 @@ pub fn annexb_process_data(data: Vec<u8>) -> Vec<u8> {
         }
 
         // Write Annex B start code
-        out.extend_from_slice(&[0x00, 0x00, 0x00, 0x01]);
+        out_annexb.extend_from_slice(&[0x00, 0x00, 0x00, 0x01]);
 
         // Write NALU payload
-        out.extend_from_slice(&data[i..i + nalu_len]);
+        out_annexb.extend_from_slice(&data[i..i + nalu_len]);
 
         // Advance
         i += nalu_len;
     }
 
-    out
+    out_annexb
 }

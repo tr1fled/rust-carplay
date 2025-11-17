@@ -18,7 +18,7 @@ use crate::cc20p1305::bindings::{
 };
 use crate::avcc::avcc::{
     avcc_to_annexb,
-    annexb_process_data
+    avc_to_annexb
 };
 
 #[derive(Debug, Clone)]
@@ -199,17 +199,8 @@ fn handle_client(mut stream: TcpStream, shared_secret: Vec<u8>, sci: String) {
                 if ret != 0 {
                     log::error!("Decryption failed: OSStatus = {}", ret);
                     continue; // or handle error
-                } else {
-                    println!("Screen frame decrytion successful!");
                 }
-                if read_counter == 1  {
-                    println!("First video data: {:x?}", body_data);
-                } else if read_counter == 2  {
-                    println!("Second video data: {:x?}", body_data);
-                } else if read_counter == 3  {
-                    println!("Third video data: {:x?}", body_data);
-                }
-                file.write_all(&annexb_process_data(body_data).as_slice()).expect("son💀💀💀💀we cant process that frame");
+                file.write_all(&avc_to_annexb(body_data).as_slice()).expect("son💀💀💀💀we cant process that frame");
             }
             //increment_nonce_le  (&mut nonce);
             read_counter += 1;
@@ -218,24 +209,6 @@ fn handle_client(mut stream: TcpStream, shared_secret: Vec<u8>, sci: String) {
             // Will do filesystem then attempt to start an Annex-B stream 
             file.write_all(&avcc_to_annexb(body_data).as_slice()).expect("son💀💀💀💀we cant process that");
         }
-        /*unsafe {
-        chacha20_poly1305_init_64x64(state_ptr, key.as_ptr(), nonce.as_ptr());
-        chacha20_poly1305_add_aad(state_ptr, header_data.as_ptr() as *const c_void, header_data.len());
-        
-        let mut length: [u8; 4] = header_data[0..4].try_into().expect("Failed to try into length");
-        println!("dec");
-        let body_len = u32::from_le_bytes(length) as usize;
-        let mut len = chacha20_poly1305_decrypt(state_ptr, body_data.as_ptr() as *const c_void, body_len-16, body_data.as_mut_ptr() as *mut c_void);
-        let mut err: i32 = 0;
-        let mut my_num_ptr: *mut i32 = &mut err;
-        println!("ver");
-        len += chacha20_poly1305_verify(state_ptr, body_data[len..].as_mut_ptr() as *mut c_void, body_data[body_len-16..].as_ptr(), my_num_ptr);
-        if err != 0 {
-        println!("Fatal error: {}", err);
-        }
-        }*/
-        
-        // Increment nonce exactly like C
     }
 }
 

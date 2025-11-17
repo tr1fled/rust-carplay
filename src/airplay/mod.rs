@@ -6,3 +6,4 @@ pub mod audio;
 pub mod timing_server;
 pub mod stream_processors;
 pub mod sinks;
+pub mod event_server;

@@ -99,6 +99,5 @@ pub fn hid_touchscreen_fill_report(pressing: bool, inX: u16, inY: u16) -> Vec<u8
     ];
     // generate a new HID report and turn it to a bplist
     plist::to_writer_binary(&mut ret, &hid_report::new(String::from("e5f7a68d-7b0f-4305-984b-974f677a150b"), report));
-    println!("{:#?}", plist::Value::from_reader(Cursor::new(ret.clone())));
     ret
 }

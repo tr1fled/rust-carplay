@@ -75,15 +75,14 @@ pub fn handle_setup(request_data: &mut HttpRequest, pair_session: &mut Session, 
         .spawn(move || {
             // This is the code that will run in the new thread
             airplay::timing_server::init(ps, aps, clock_wrapper);
-        });
+        }).unwrap();
         let ps = pair_session.clone();
         let aps = Arc::clone(&airplay_session);
         thread::Builder::new()
-        .name("airplay_session_init".to_string()) // Set the desired name for the thread
+        .name("event_server".to_string())
         .spawn(|| {
-            // This is the code that will run in the new thread
-            airplay::airplay_session::init(ps, aps);
-        });
+            airplay::event_server::init(ps, aps);
+        }).unwrap();
     } else {
         println!("Now we have streams to process, sending them to the stream processor...");
         let streams = req_parsed.as_dictionary().and_then(|dict| dict.get("streams")).expect("Failed to fetch streams").as_array().expect("Failed to fetch streams as array");
