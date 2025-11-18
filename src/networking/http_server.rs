@@ -257,7 +257,7 @@ fn handle_client(mut stream: TcpStream) {
 
 pub fn init() -> std::io::Result<()> {
     let listener = TcpListener::bind("0.0.0.0:7000")?;
-    let pool = ThreadPool::new(4);
+    let pool = ThreadPool::new(1);
     log::info!("Initialized HTTP/RSTP server");
     // accept connections and process them serially
     for stream in listener.incoming() {

@@ -144,10 +144,10 @@ fn setup_mouse_handlers(widget: &RenderWidget, transmitter: Sender<EventSessionM
 fn create_ui(app: &gtk::Application, airplay_session: Arc<Mutex<AirplaySession>>) {
     let pipeline = gst::Pipeline::new();
     
-    let h264parse = gst::ElementFactory::make("h264parse").build().unwrap();
-    let decoder   = gst::ElementFactory::make("decodebin").build().unwrap();
-    let convert   = gst::ElementFactory::make("videoconvert").build().unwrap();
+    let decoder   = gst::ElementFactory::make("v4l2h264dec").build().unwrap();
+    let convert   = gst::ElementFactory::make("v4l2convert").build().unwrap();
     let gtksink   = gst::ElementFactory::make("gtk4paintablesink").build().unwrap();
+    let queue = gst::ElementFactory::make("queue").build().unwrap();
     //let queue = gst::ElementFactory::make("queue").build().unwrap();
     
     let paintable = gtksink.property::<gdk::Paintable>("paintable");
@@ -165,19 +165,22 @@ fn create_ui(app: &gtk::Application, airplay_session: Arc<Mutex<AirplaySession>>
         let caps = gst::Caps::builder("video/x-h264")
         .field("stream-format", "byte-stream")   // annex-b
         .field("alignment", "au")                // important
+        .field("profile", "high")
+        .field("level", "3.2")
         .build();
         src.set_caps(Some(&caps));
         
         pipeline
-        .add_many([src.upcast_ref(), &h264parse, &decoder, &convert, &gtksink])
+        .add_many([src.upcast_ref(), &queue, &decoder, &convert, &gtksink])
         //.add_many([src.upcast_ref(), &queue, &h264parse, &decoder, &convert, &gtksink])
         .unwrap();
         
         // Static links (OK)
         //src.link(&queue).unwrap();
         //queue.link(&h264parse).unwrap();
-        src.link(&h264parse).unwrap();
-        h264parse.link(&decoder).unwrap();
+        src.link(&queue).unwrap();
+        queue.link(&decoder).unwrap();
+        decoder.link(&convert).unwrap();
         
         let convert_clone = convert.clone();
         
