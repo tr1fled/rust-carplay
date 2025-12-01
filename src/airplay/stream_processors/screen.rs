@@ -45,11 +45,13 @@ fn handle_client(mut stream: TcpStream, shared_secret: Vec<u8>, sci: String, air
         sd.data_sink.clone().expect("APPSRC IS NONE! FAIL!")
     };
     loop {
-        //println!("caught in the loop! [screen]");
         let mut header_data = [0; 128];
         let read = match stream.read(&mut header_data) {
             Ok(r) if r > 0 => r,
-            Ok(_) => continue,
+            Ok(_) => {
+                println!("continuing, there could be an error after this, yes? no? lmk");
+                continue;
+            }, // PIN, PLEASE DONT DO CONTINUE WITHOUT INCREASING BUF
             Err(e) => {
                 log::error!("Error reading buffer: {}", e);
                 return;
@@ -89,6 +91,7 @@ fn handle_client(mut stream: TcpStream, shared_secret: Vec<u8>, sci: String, air
             
             // Call the C decryption function
             unsafe {
+                let ononce = nonce.clone();
                 let ret = chachadecrypt_64x64(
                     key.as_ptr(),
                     nonce.as_mut_ptr(),
@@ -96,6 +99,11 @@ fn handle_client(mut stream: TcpStream, shared_secret: Vec<u8>, sci: String, air
                     body_data.as_mut_ptr() as *mut c_void,
                     body_len,
                 );
+                if ononce == nonce {
+                    println!("nonce recovery performed");
+                    nonce = (u64::from_le_bytes(nonce)+1).to_le_bytes();
+                }
+                println!("{:02X?}", &nonce);
                 
                 if ret != 0 {
                     log::error!("Decryption failed: OSStatus = {}", ret);
@@ -128,7 +136,7 @@ fn handle_client(mut stream: TcpStream, shared_secret: Vec<u8>, sci: String, air
 }
 
 /// Start the TCP listener and spawn threads
-pub fn init(shared_secret: Vec<u8>, port: String, streamdata: Stream, airplay_session: Arc<Mutex<AirplaySession>>) {
+pub fn init(shared_secret: Vec<u8>, port: String, stream_connection_id: String, airplay_session: Arc<Mutex<AirplaySession>>) {
     let listener = TcpListener::bind(format!("0.0.0.0:{}", port))
     .expect("Failed to initialize the Screen Stream Receiver");
     let pool = ThreadPool::new(4);
@@ -138,7 +146,7 @@ pub fn init(shared_secret: Vec<u8>, port: String, streamdata: Stream, airplay_se
     for stream in listener.incoming() {
         let stream = stream.unwrap();
         let ss = shared_secret.clone();
-        let sci = streamdata.stream_connection_id.clone();
+        let sci = stream_connection_id.clone();
         let aps = airplay_session.clone();
         pool.execute(move || {
             handle_client(stream, ss, sci, aps);

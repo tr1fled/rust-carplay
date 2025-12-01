@@ -1,5 +1,5 @@
 // moving to this file, because if i dont http_server will turn to 999999999 lines of pure spaghetti
-use crate::{airplay::{self, airplay_session::{AirplaySession, Stream}}, networking::http_responders::pair_setup::Session, parsing::http::{
+use crate::{airplay::{self, airplay_session::{AirplaySession, AudioStream, ScreenStream, Stream}}, networking::http_responders::pair_setup::Session, parsing::http::{
     HttpRequest,
     HttpResponse
 }, timing::bindings::{AirTunesClock_Create, AirTunesClockPrivate, AirTunesClockRef}};
@@ -89,12 +89,10 @@ pub fn handle_setup(request_data: &mut HttpRequest, pair_session: &mut Session, 
         let mut streamlist: Vec<Stream> = vec![];
         println!("Processing streams. Streams found will be below!");
         for stream in streams {
-            let sci_unsigned: u64 = {
-                // Fetch the streamConnectionID from the plist dictionary
-                let raw_value = stream.as_dictionary()
+            let raw_value = stream.as_dictionary()
                 .and_then(|dict| dict.get("streamConnectionID"))
                 .expect("Failed to fetch stream connection id");
-                
+            let sci_unsigned: u64 = {
                 // Convert it to i64 if possible, otherwise fail
                 let signed_id = raw_value
                 .as_signed_integer()
@@ -103,24 +101,39 @@ pub fn handle_setup(request_data: &mut HttpRequest, pair_session: &mut Session, 
                 // Reinterpret as u64
                 signed_id as u64
             };
+            let sci_val = raw_value.clone();
             let sci = format!("{}", sci_unsigned);
             let mut end_stream: Stream;
             if stream.as_dictionary().and_then(|dict| dict.get("type")).expect("Failed to fetch stream type").as_unsigned_integer().expect("Failed to fetch stream type as int") == 110 {
-                end_stream = Stream {
+                end_stream = Stream::Screen(ScreenStream {
                     r#type: stream.as_dictionary().and_then(|dict| dict.get("type")).expect("Failed to fetch stream type").as_unsigned_integer().expect("Failed to fetch stream type as int"),
-                    audio_type: None,
-                    audio_format: None,
                     uuid: Some(String::from(stream.as_dictionary().and_then(|dict| dict.get("uuid")).expect("Failed to fetch stream UUID").as_string().expect("Failed to fetch stream UUID as str"))),
                     stream_connection_id: sci,
-                };
+                });
             } else {
-                end_stream = Stream {
-                    r#type: stream.as_dictionary().and_then(|dict| dict.get("type")).expect("Failed to fetch stream type").as_unsigned_integer().expect("Failed to fetch stream type as int"),
-                    audio_type: Some(String::from(stream.as_dictionary().and_then(|dict| dict.get("audioType")).expect("Failed to fetch stream's audioType").as_string().expect("Failed to fetch stream's audioType as str"))),
-                    audio_format: Some(stream.as_dictionary().and_then(|dict| dict.get("audioFormat")).expect("Failed to fetch stream's audio format'").as_unsigned_integer().expect("Failed to fetch stream's audio format as int'")),
+                end_stream = Stream::Audio(AudioStream {
+                    r#type: stream.as_dictionary().and_then(|dict| dict.get("type"))
+                        .expect("Failed to fetch stream type")
+                        .as_unsigned_integer()
+                        .expect("Failed to fetch stream type as int"),
+                    audio_type: String::from(stream.as_dictionary().and_then(|dict| dict.get("audioType"))
+                        .expect("Failed to fetch stream's audioType")
+                        .as_string()
+                        .expect("Failed to fetch stream's audioType as str")),
+                    audio_format: stream.as_dictionary().and_then(|dict| dict.get("audioFormat"))
+                        .expect("Failed to fetch stream's audio format'")
+                        .as_unsigned_integer()
+                        .expect("Failed to fetch stream's audio format as int'"),
                     stream_connection_id: sci,
-                    uuid: None,
-                };
+                    unfmt_stream_connection_id: sci_val,
+                    control_port: stream.as_dictionary().and_then(|dict| dict.get("controlPort"))
+                        .expect("Failed to fetch stream's control port'")
+                        .as_unsigned_integer().expect("Failed to fetch stream's control port as int'")
+                        .to_string(),
+                    spf: stream.as_dictionary().and_then(|dict| dict.get("spf")).expect("Failed to fetch stream's spf'").as_unsigned_integer().expect("Failed to fetch stream's spf as int'").try_into().unwrap(),
+                    sink: None,
+                    pipeline: None,
+                });
             }
             match stream.as_dictionary().and_then(|dict| dict.get("type")).expect("Failed to fetch stream type").as_unsigned_integer().expect("Failed to fetch stream type as int") {
                 0 => panic!("Invalid stream type 0"),
@@ -135,7 +148,8 @@ pub fn handle_setup(request_data: &mut HttpRequest, pair_session: &mut Session, 
                 111 => println!("Alt screen"),
                 _ => panic!("Stream type not recognized"),
             }
-            streamlist.push(end_stream);
+            streamlist.push(end_stream.clone());
+            println!("{:?}", end_stream);
         }
         println!("Those were the streams.");
         airplay::airplay_session::process_streams(streamlist, &airplay_session, &mut response_body, pair_session.shared_secret.clone());

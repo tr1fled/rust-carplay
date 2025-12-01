@@ -198,7 +198,11 @@ fn handle_client(mut stream: TcpStream) {
                 
                 "/info" => {
                     response_data = handle_info(request_data, &mut pair_session)
-                }
+                },
+
+                /*"/feedback" => {
+                    response_data = handle_feedback(request_data, Arc::clone(&airplay_session))
+                },*/
                 
                 // Handle anything else
                 _ => response_data = HttpResponse { status_code: String::from("200 OK"), protocol: request_data.protocol, headers: vec![], body: vec![], content_type: String::from(""), end: true },

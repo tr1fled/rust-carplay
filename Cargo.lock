@@ -1920,6 +1920,7 @@ dependencies = [
  "gst-plugin-gtk4",
  "gstreamer",
  "gstreamer-app",
+ "gstreamer-sys",
  "gstreamer-video",
  "gtk4",
  "hkdf",

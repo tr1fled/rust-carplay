@@ -1,79 +1,108 @@
-// "i like kasane teto and miku"
-// 🔁translating🔁
-// hi i have self diagnosed autism and want to crack 16 year old girls uwu
+// audio server
+// honestly this looks so hard to do on the original code
+// but rlly what they call a 'node' is a queued audio packet
+
+// so thats that
 use std::io::Read;
-use std::net::{TcpListener, TcpStream};
+use std::net::UdpSocket;
 use std::os::raw::c_void;
-use threadpool::ThreadPool;
+use std::thread;
 use sha2::Sha512;
 use hkdf::Hkdf;
 use std::io::Write;
+use std::sync::{Arc, Mutex};
 use std::process::{Command, Stdio};
 use std::io::prelude::*; // Import the Write trait
-use crate::airplay::airplay_session::Stream;
+use crate::airplay::airplay_session::{AirplaySession, AudioStream};
+use crate::cc20p1305::bindings::{chacha20_poly1305_add_aad, chacha20_poly1305_decrypt, chacha20_poly1305_init_64x64, chacha20_poly1305_state, chacha20_poly1305_verify};
+use crate::networking::http_server::decrypt_chunk;
 use crate::networking::http_responders::pair_setup::chacha20_poly1305_decrypt_all_64x64_nopad;
 use crate::chachacryptor::bindings::chachadecrypt_64x64;
+use crate::airplay::audio::audio_format_to_asbd;
+use crate::airplay::sinks::audio_gst::init_sink;
+use gst_app::AppSrc;
+use std::fs;
+use std::io;
 
-#[derive(Debug, Clone)]
-pub struct ScreenSession {
-    pub salt: [u8; 16],
-    pub verifier: Vec<u8>,
-    pub b: Vec<u8>,        // was [u8;64]
-    pub b_pub: Vec<u8>,
-    pub shared_secret: Vec<u8>,
-    pub encrypt_key: [u8; 32],
-    pub mfi_encrypt_key: [u8; 32],
-    // peer data
-    pub peer_identifier: Vec<u8>,
-    pub peer_ed_pk: Vec<u8>,
-    // host's ed
-    pub host_ed_pk: Vec<u8>,
-    pub host_ed_sk: Vec<u8>,
-    // host's curve
-    pub host_curve_sk: Vec<u8>,
-    pub host_curve_pk: Vec<u8>,
-    // peer's curve
-    pub peer_curve_pk: Vec<u8>,
-    pub encrypted : bool,
-    pub read_counter: u64,
-    pub write_counter: u64,
+// NO -- debes ir sola, eres joven, eres rica. ahh
+// - Jonaz
+#[derive(Clone, Debug)]
+pub struct RTPHeader {
+    v_p_x_cc: u8,
+    m_pt: u8,
+    seq: u16,
+    ts: u32,
+    ssrc: u32
+}
+#[derive(Clone, Debug)]
+pub struct RTPPacket {
+    header: RTPHeader,
+    payload: Vec<u8>,
+    
 }
 
-impl ScreenSession {
-    pub fn new() -> Self {
+impl RTPPacket {
+    pub fn new(in_packet: &Vec<u8>) -> Self {
+        //println!("INPKT LEN: {:?}", in_packet.clone().len());
+        let in_header = in_packet.clone()[0..12].to_vec();
         Self {
-            salt: [0; 16],
-            verifier: Vec::new(),
-            b: Vec::new(),
-            b_pub: Vec::new(),
-            shared_secret: Vec::new(),
-            encrypt_key: [0; 32],
-            mfi_encrypt_key: [0; 32],
-            peer_identifier: Vec::new(),
-            peer_ed_pk: Vec::new(),
-            host_ed_pk: Vec::new(),
-            host_ed_sk: Vec::with_capacity(32),
-            host_curve_sk: Vec::new(),
-            host_curve_pk: Vec::new(),
-            peer_curve_pk: Vec::new(),
-            encrypted: false,
-            read_counter: 0,
-            write_counter: 0,
+            header: RTPHeader {
+                v_p_x_cc: in_header[0],
+                m_pt: in_header[1],
+                seq: u16::from_be_bytes([in_header[2], in_header[3]]),
+                ts: u32::from_be_bytes([in_header[4], in_header[5], in_header[6], in_header[7]]),
+                ssrc: u32::from_be_bytes([in_header[8], in_header[9], in_header[10], in_header[11]])
+            },
+            payload: in_packet[12..].to_vec()
         }
     }
-}
-
-/// Increment 8-byte little endian nonce exactly like C's LittleEndianIntegerIncrement
-fn increment_nonce_le(nonce: &mut [u8; 8]) {
-    let mut carry = 1u8;
-    for byte in nonce.iter_mut() {
-        let (new_byte, overflow) = byte.overflowing_add(carry);
-        *byte = new_byte;
-        if !overflow { break; }
-        carry = 1;
+    // we are doing the same thing apple is doing, what is that? 9999 functions for everything
+    // but i want to make it look as similar as possible, tho this might be even cleaner
+    pub fn generate_aad(in_packet: &Self) -> Vec<u8> {
+        let mut result: Vec<u8> = Vec::new();
+        result.extend_from_slice(&in_packet.header.ts.to_be_bytes());
+        result.extend_from_slice(&in_packet.header.ssrc.to_be_bytes());
+        result
     }
 }
 
+pub fn decrypt_frame_fresh(
+    key: &[u8; 32],
+    nonce: &[u8; 8],
+    aad: &[u8],
+    frame: &mut [u8],
+) -> Result<usize, i32> {
+    unsafe {
+        let mut state = std::mem::MaybeUninit::<chacha20_poly1305_state>::uninit();
+        
+        // Init cipher with 8-byte nonce
+        let body_len = frame.len().checked_sub(24).ok_or(-1)?;
+        chacha20_poly1305_init_64x64(state.as_mut_ptr(), key.as_ptr(), frame[body_len+16..].as_ptr());
+        
+        // Header as AAD
+        chacha20_poly1305_add_aad(state.as_mut_ptr(), aad.as_ptr() as *const c_void, aad.len());
+        let decrypted_len = chacha20_poly1305_decrypt(
+            state.as_mut_ptr(),
+            frame.as_ptr() as *const c_void,
+            body_len,
+            frame.as_mut_ptr() as *mut c_void,
+        );
+        
+        let mut err: i32 = 0;
+        chacha20_poly1305_verify(
+            state.as_mut_ptr(),
+            frame[decrypted_len..].as_mut_ptr() as *mut c_void,
+            frame[body_len..body_len + 16].as_ptr(),
+            &mut err,
+        );
+        
+        if err != 0 {
+            return Err(err);
+        }
+        
+        Ok(body_len)
+    }
+}
 /// Convert any signed integer to a u64 string for HKDF salt
 fn sci_to_u64_string(sci_str: &str) -> String {
     if let Ok(val) = sci_str.parse::<i64>() {
@@ -83,134 +112,106 @@ fn sci_to_u64_string(sci_str: &str) -> String {
     }
 }
 
-/// Handle a single TCP client
-fn handle_client(mut stream: TcpStream, shared_secret: Vec<u8>, sci: String) {
+fn roundup(value: u64, multiple: u64) -> u64 {
+    ( ( ( (value) + ( (multiple) - 1 ) ) / (multiple) ) * (multiple) )
+}
+
+pub fn init_rtcp(rtcp_port_local: String, rtcp_address_remote: String) {
+    let socket = UdpSocket::bind(format!("0.0.0.0:{}", rtcp_port_local))
+    .expect("couldn't bind to address");
+    println!("res of socket conn: {:?}", socket.connect(rtcp_address_remote));
+}
+
+/// Start the TCP listener and spawn threads
+pub fn init(airplay_session: Arc<Mutex<AirplaySession>>, shared_secret: Vec<u8>, data_port: String, rtcp_port_local: String, rtcp_port_remote: String, stream: Arc<Mutex<AudioStream>>) {
+    let socket = UdpSocket::bind(format!("0.0.0.0:{}", data_port)).expect("Failed to");
+    init_sink(Arc::clone(&stream));
+    let pipeline: gst::Pipeline;
+    let appsrc: gst_app::AppSrc;
+    let sci: String;
+    {
+        let st = stream.lock().unwrap();
+        pipeline = st.pipeline.as_ref().unwrap().clone();
+        appsrc = st.sink.as_ref().unwrap().clone();
+        sci = st.stream_connection_id.clone();
+    }
+    let peer_ip: String;
+    {
+        let aps = airplay_session.lock().unwrap();
+        peer_ip = aps.peer_ip.clone();
+    }
+    thread::spawn(move || {
+        init_rtcp(rtcp_port_local, format!("{}:{}", peer_ip, rtcp_port_remote));
+    });
+    let fmt: u64;
+    let spf: u32;
+    {
+        let stdat = stream.lock().unwrap();
+        fmt = stdat.audio_format;
+        spf = stdat.spf.try_into().unwrap();
+    }
+    let asbd = audio_format_to_asbd(fmt);
+    // holy trying hell
+    let bytes_per_unit = match asbd.bytes_per_frame {
+        0 => { ((TryInto::<u32>::try_into(roundup(asbd.bits_per_channel.into(), 8)).unwrap() * asbd.channels_per_frame) / 8) },
+        _ => asbd.bytes_per_frame
+    };
+    // equation
+    let i = ( spf + ( (spf / 441) + 16 ) ) * asbd.bytes_per_frame;
+    // Bind socket to port 7000
+    let mut buf = [0; 1024]; // A buffer to store incoming data
+    let mut key = [0u8; 32];
+    Hkdf::<Sha512>::new(Some(format!("DataStream-Salt{}", sci).as_bytes()), &shared_secret)
+    .expand(b"DataStream-Output-Encryption-Key", &mut key)
+    .expect("HKDF expand failed");
     let mut read_counter: u64 = 0;
-    let mut nonce: [u8; 8] = [0; 8];
-    let mut child = Command::new("gst-launch-1.0")
-    .args([
-        "fdsrc", "!",
-        "h264parse", "!",
-        "decodebin", "!",
-        "videoconvert", "!",
-        "xvimagesink", "name=video_sink sync=false", // optional: ensures a visible window
-        ])
-        .env("DISPLAY", ":0")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .spawn()
-        .expect("Failed to spawn gst-launch");
-        let mut child_stdin = child.stdin.take().expect("Failed to open stdin");
-        
-        loop {
-            //println!("caught in the loop! [screen]");
-            let mut header_data = [0; 128];
-            let read = match stream.read(&mut header_data) {
-                Ok(r) if r > 0 => r,
-                Ok(_) => continue,
-                Err(e) => {
-                    log::error!("Error reading buffer: {}", e);
-                    return;
-                }
-            };
-            //println!("caught in the afterread! [screen]");
-            if read < 128 { continue; }
-            let data_length = u32::from_le_bytes(header_data[0..4].try_into().expect("Wtf? Buffer that will go 0..4 is untryable...")) as usize;
-            let mut body_data: Vec<u8> = vec![0; data_length];
-            if let Err(e) = stream.read_exact(&mut body_data) {
-                panic!("Error reading body: {}", e);
-            }    
+    loop {
+        // recv_from returns the number of bytes read and the address of the sender.
+        let (len, addr) = socket.recv_from(&mut buf).expect("failed to recv");
+        //println!("received the following data: {:02X?}", &buf[..len]);
+        let mut audio_data = RTPPacket::new(&buf[..len].to_vec());
+        let aad = RTPPacket::generate_aad(&audio_data);
+        //println!("THE LENGTH OF THE AUDIO DATA PAYLOAD IS: {:?}", audio_data.payload.len());
+        //println!("TS: {}", &audio_data.header.ts);
+        let mut frame = audio_data.payload.clone();
+        unsafe {
+            let mut state = std::mem::MaybeUninit::<chacha20_poly1305_state>::uninit();
             
-            let mut key = [0u8; 32];
-            let salt_string = sci_to_u64_string(&sci);
-            Hkdf::<Sha512>::new(Some(format!("DataStream-Salt{}", salt_string).as_bytes()), &shared_secret)
-            .expand(b"DataStream-Output-Encryption-Key", &mut key)
-            .expect("HKDF expand failed");
+            // Init cipher with 8-byte nonce
+            let body_len = frame.len().checked_sub(24).ok_or(-1).unwrap();
+            chacha20_poly1305_init_64x64(state.as_mut_ptr(), key.as_ptr(), frame[body_len+16..].as_ptr());
             
-            // Set nonce from read_counter (LE bytes)
-            let body_len = u32::from_le_bytes(header_data[0..4].try_into().unwrap());
-            /*println!("nonce: {:x?}", nonce);
-            println!("length: {:x?}",  &header_data[0..4]);
-            println!("header_data: {:x?}", &header_data[..16]);*/ // first 16 bytes for sanity
-            //println!("body_data (first 16 bytes): {:x?}", &body_data[..16]);
-            if &header_data[4] == &0u8 {
-                // you keep me waiting, down here, so far below
-                //println!("framedata: {:x?}", chacha20_poly1305_decrypt_all_64x64_nopad(&key, &nonce, &body_data, Some(&header_data)));
-                let body_len = u32::from_le_bytes(header_data[0..4].try_into().unwrap());
-                let body_len_usize = body_len as usize;
-                
-                // Ensure full body is available
-                if body_data.len() < body_len_usize {
-                    log::error!(
-                        "Truncated frame: header says {} bytes, but body_data.len() = {}",
-                        body_len_usize,
-                        body_data.len()
-                    );
-                    continue; // don't call C FFI
-                }
-                
-                // Call the C decryption function
-                unsafe {
-                    let ret = chachadecrypt_64x64(
-                        key.as_ptr(),
-                        nonce.as_mut_ptr(),
-                        header_data.as_ptr() as *const c_void,
-                        body_data.as_mut_ptr() as *mut c_void,
-                        body_len,
-                    );
-                    
-                    if ret != 0 {
-                        log::error!("Decryption failed: OSStatus = {}", ret);
-                        continue; // or handle error
-                    } else {
-                        //println!("Screen frame decrytion successful!");
-                    }
-                    //child_stdin.write_all(annexb_process_data(body_data).as_slice()).expect("son...............we cant write to the process......im crine");
-                }
-                //increment_nonce_le  (&mut nonce);
-                read_counter += 1;
-            } else if &header_data[4] == &1u8 {
-                // TO-DO :: Write everything to an interpretor or to filesystem.
-                // Will do filesystem then attempt to start an Annex-B stream 
-                //child_stdin.write_all(avcc_to_annexb(body_data).as_slice()).expect("son...............we cant write to the process......im crine");
-            }
-            /*unsafe {
-            chacha20_poly1305_init_64x64(state_ptr, key.as_ptr(), nonce.as_ptr());
-            chacha20_poly1305_add_aad(state_ptr, header_data.as_ptr() as *const c_void, header_data.len());
+            // Header as AAD
+            chacha20_poly1305_add_aad(state.as_mut_ptr(), aad.as_ptr() as *const c_void, aad.len());
+            let decrypted_len = chacha20_poly1305_decrypt(
+                state.as_mut_ptr(),
+                frame.as_ptr() as *const c_void,
+                body_len,
+                frame.as_mut_ptr() as *mut c_void,
+            );
             
-            let mut length: [u8; 4] = header_data[0..4].try_into().expect("Failed to try into length");
-            println!("dec");
-            let body_len = u32::from_le_bytes(length) as usize;
-            let mut len = chacha20_poly1305_decrypt(state_ptr, body_data.as_ptr() as *const c_void, body_len-16, body_data.as_mut_ptr() as *mut c_void);
             let mut err: i32 = 0;
-            let mut my_num_ptr: *mut i32 = &mut err;
-            println!("ver");
-            len += chacha20_poly1305_verify(state_ptr, body_data[len..].as_mut_ptr() as *mut c_void, body_data[body_len-16..].as_ptr(), my_num_ptr);
+            chacha20_poly1305_verify(
+                state.as_mut_ptr(),
+                frame[decrypted_len..].as_mut_ptr() as *mut c_void,
+                frame[body_len..body_len + 16].as_ptr(),
+                &mut err,
+            );
             if err != 0 {
-            println!("Fatal error: {}", err);
+                eprintln!("OSStatus {} while trying to decrypt", err);
+            }else {
+                //file.write_all(&frame[..body_len].to_vec()).unwrap();
+                //println!("{:02X?}", frame[..body_len].to_vec());
+                let mut buf = gst::Buffer::from_slice(frame[..body_len].to_vec());
+                let mut nbuf = buf.get_mut().unwrap();
+                let pts_value = gst::ClockTime::from_seconds((1024 / 44100).try_into().unwrap());
+                //let pts_value1 = gst::ClockTime::from_mseconds((audio_data.header.ts / 44100).try_into().unwrap());
+                nbuf.set_duration(Some(pts_value));
+                //nbuf.set_pts(Some(pts_value1));
+                appsrc.push_buffer(buf).unwrap();
             }
-            }*/
-            
-            // Increment nonce exactly like C
         }
+        read_counter += 1;
+        //println!("audio data: {:02X?}", &audio_data.payload[0..8]);
     }
-    
-    /// Start the TCP listener and spawn threads
-    pub fn init(shared_secret: Vec<u8>, port: String, streamdata: Stream) {
-        let listener = TcpListener::bind(format!("0.0.0.0:{}", port))
-        .expect("Failed to initialize the Screen Stream Receiver");
-        let pool = ThreadPool::new(4);
-        
-        log::info!("Initialized Screen Stream Receiver");
-        
-        for stream in listener.incoming() {
-            let stream = stream.unwrap();
-            let ss = shared_secret.clone();
-            let sci = streamdata.stream_connection_id.clone();
-            
-            pool.execute(move || {
-                handle_client(stream, ss, sci);
-            });
-        }
-    }
-    
+}
