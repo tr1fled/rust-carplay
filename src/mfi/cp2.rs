@@ -83,7 +83,7 @@ pub fn read_key(dev: Option<Arc<Mutex<LinuxI2CDevice>>>, key: String) -> Vec<u8>
     match data_read {
         Ok(d) => vec![d],
         Err(error) => {
-            log::error!("Error while reading i2c key!\nKey: {}\nError: {:?}", key, error);
+            log::error!("Error while reading i2c key!\nError: {:?}", error);
             vec![0x00]
         }
     }
@@ -123,9 +123,6 @@ pub fn rsa_sign(dev: Option<Arc<Mutex<LinuxI2CDevice>>>, msg: &[u8]) -> Result<V
     let final_len: Vec<u8> = vec![len[0], len[1]];
     wrapped_write_i2c(&mut dev2, 0x20, final_len);
     wrapped_write_i2c(&mut dev2, 0x21, msg.to_vec());
-    let mut msgs = [
-    LinuxI2CMessage::write(&[addr]).with_address(SLAVE_ADDR),
-    ];
     dev2.smbus_write_byte_data(0x10, 0x01);
     thread::sleep(Duration::from_millis(1));
     for num in 0..10 {
