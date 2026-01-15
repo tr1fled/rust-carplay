@@ -118,7 +118,7 @@ pub fn rsa_sign(dev: Option<Arc<Mutex<LinuxI2CDevice>>>, msg: &[u8]) -> Result<V
             return rsa_sign_fake(msg)
         }
     }
-    dev2 = dev1.lock().unwrap();
+    dev2 = dev.unwrap().lock().unwrap();
     let len = msg.len().to_be_bytes();
     let final_len: Vec<u8> = vec![len[0], len[1]];
     wrapped_write_i2c(&mut dev2, 0x20, final_len);
