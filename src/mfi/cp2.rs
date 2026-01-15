@@ -109,13 +109,11 @@ pub fn ret_cp_pubkey(dev: Option<Arc<Mutex<LinuxI2CDevice>>>) -> Vec<u8> {
 
 // Sign message with the embedded memory key
 pub fn rsa_sign(dev: Option<Arc<Mutex<LinuxI2CDevice>>>, msg: &[u8]) -> Result<Vec<u8>, ()> {
-    let mut dev2;
     if dev.is_none() {
         log::warn!("You are currently using the cp2 module for authentication, but no Coprocessor was found! Falling back to fake_mfi");
         return rsa_sign_fake(msg)
     }
-    let mut uwrapped = dev.unwrap().clone();
-    dev2 = uwrapped.lock().unwrap();
+    let mut dev1 = dev.unwrap().lock().unwrap();
     let len = msg.len().to_be_bytes();
     let final_len: Vec<u8> = vec![len[0], len[1]];
     wrapped_write_i2c(&mut dev2, 0x20, final_len);
