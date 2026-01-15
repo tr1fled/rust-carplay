@@ -113,7 +113,8 @@ pub fn rsa_sign(dev: Option<Arc<Mutex<LinuxI2CDevice>>>, msg: &[u8]) -> Result<V
         log::warn!("You are currently using the cp2 module for authentication, but no Coprocessor was found! Falling back to fake_mfi");
         return rsa_sign_fake(msg)
     }
-    let mut dev2 = dev.unwrap().clone().lock().unwrap();
+    let mut device_uw = dev.unwrap().clone();
+    let mut dev2 = device_uw.lock().unwrap();
     let len = msg.len().to_be_bytes();
     let final_len: Vec<u8> = vec![len[0], len[1]];
     wrapped_write_i2c(&mut dev2, 0x20, final_len);
