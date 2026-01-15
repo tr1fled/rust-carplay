@@ -123,11 +123,11 @@ pub fn rsa_sign(dev: Option<Arc<Mutex<LinuxI2CDevice>>>, msg: &[u8]) -> Result<V
     let len = msg.len().to_be_bytes();
     let final_len: Vec<u8> = vec![len[0], len[1]];
     wrapped_write_i2c(&mut dev2, 0x20, final_len.as_slice());
-    thread::sleep(Duration::from_millis(50));
+    thread::sleep(Duration::from_millis(100));
     wrapped_write_i2c(&mut dev2, 0x21, msg);
-    thread::sleep(Duration::from_millis(50));
+    thread::sleep(Duration::from_millis(100));
     dev2.smbus_write_byte_data(0x10, 0x01);
-    thread::sleep(Duration::from_millis(50));
+    thread::sleep(Duration::from_millis(100));
     for num in 0..10 {
         let bit = match dev2.smbus_read_byte_data(0x10) {
             Ok(data) => {
@@ -143,10 +143,11 @@ pub fn rsa_sign(dev: Option<Arc<Mutex<LinuxI2CDevice>>>, msg: &[u8]) -> Result<V
                 continue;
             }
         };
+        println!("the bit is: {:?}", bit);
     };
     log::info!("Coprocessor successfully signed challenge!");
     let size = wrapped_read_i2c(&mut dev2, 0x11, 2);
-    thread::sleep(Duration::from_millis(10));
+    thread::sleep(Duration::from_millis(100));
     let size_translation: [u8; 2] = [size[0], size[1]];
     let final_size = u16::from_be_bytes(size_translation);
     let end = wrapped_read_i2c(&mut dev2, 0x12, final_size.try_into().unwrap());
