@@ -379,13 +379,13 @@ pub fn handle_m3(data: Vec<TlvField>, pair_session: &mut Session) -> Vec<u8> {
     
     let mut hasher = Sha1::new();
     hasher.update(msg);
-    let signature = cp2::rsa_sign(Arc::Clone(pair_session.i2c_device), hasher.finalize().as_slice()).expect("Error signing with MFi");
+    let signature = cp2::rsa_sign(pair_session.i2c_device.clone(), hasher.finalize().as_slice()).expect("Error signing with MFi");
     let encryptedfields = vec![
     // Signature
     TlvField { field_type: kTLVType_Signature, data: signature },
     
     // MFi IC Certificate
-    TlvField { field_type: kTLVType_Certificate, data: cp2::ret_cp_pubkey(Arc::Clone(pair_session.i2c_device)) },
+    TlvField { field_type: kTLVType_Certificate, data: cp2::ret_cp_pubkey(pair_session.i2c_device.clone()) },
     ];
     let nonce = b"PS-Msg04"; // exactly 8 bytes
     let (mut ciphertext, tag) = chacha20_poly1305_encrypt_all_64x64(&pair_session.encrypt_key, &nonce, tlv_marshal(&encryptedfields).as_slice(), None);
