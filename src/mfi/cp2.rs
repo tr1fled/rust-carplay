@@ -23,7 +23,7 @@ const SLAVE_ADDR: u16 = 0x10;
 /// `addr` - `u8` containing the read address
 /// `n` - `usize` containing the size to read
 fn wrapped_read_i2c(dev: &mut LinuxI2CDevice, addr: u8, n: usize) -> Vec<u8> {
-    let mut to_ret: Vec<u8> = Vec::with_capacity(n);
+    let mut to_ret: Vec<u8> = vec![0; n];
     let data = [addr];
     let mut msgs = [
     LinuxI2CMessage::write(&data).with_address(SLAVE_ADDR),
@@ -128,7 +128,9 @@ pub fn rsa_sign(dev: Option<Arc<Mutex<LinuxI2CDevice>>>, msg: &[u8]) -> Result<V
                 thread::sleep(Duration::from_millis(10));
                 data
             },
-            Err(e) => panic!("Error while reading Coprocessor: {:?}", e),
+            Err(e) => {
+                thread::sleep(Duration::from_millis(10));
+            }
         };
         if num == 9 {
             panic!("Timeout while reading Coprocessor, the last bit on register 0x10 (Authentication Control and Status) was: {}", bit);
