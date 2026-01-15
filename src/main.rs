@@ -28,8 +28,8 @@ fn post_coprocessor(dev: &str) {
     let mut opt: Option<LinuxI2CDevice> = match LinuxI2CDevice::new(dev, 0x10) {
         Ok(lid) => {
             let toread: Arc<Mutex<LinuxI2CDevice>> = Arc::new(Mutex::new(lid));
-            let dev_version = read_key(toread.clone(), String::from("device_version"));
-            let firm_version = read_key(toread.clone(), String::from("firmware_version"));
+            let dev_version = mfi::cp2::read_key(Some(toread.clone()), String::from("device_version"));
+            let firm_version = mfi::cp2::read_key(Some(toread.clone()), String::from("firmware_version"));
             let pretty_version = match dev_version[0] {
                 0x05 => "2.0C",
                 0x07 => "3.0",
@@ -43,7 +43,6 @@ fn post_coprocessor(dev: &str) {
             Some(lid)
         },
         Err(err) => {
-            opt = None;
             log::warn!("Error while connecting to Authentication Coprocessor @ {}:\n{:?}", dev, err);
             log::warn!("Please confirm you have a Coprocessor 2.0 (3959) or a Coprocessor 3.0 (0177), if you do not have either, use fake_mfi.");
             None
