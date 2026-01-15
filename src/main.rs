@@ -25,7 +25,8 @@ use crate::mfi::cp2::ret_cp_pubkey;
 
 fn post_coprocessor(dev: &str) {
     log::info!("Begin Authentication Coprocessor POST sequence");
-    let mut opt: Option<LinuxI2CDevice> = match LinuxI2CDevice::new(dev, 0x10) {
+    //let mut opt: Option<LinuxI2CDevice> = 
+    match LinuxI2CDevice::new(dev, 0x10) {
         Ok(lid) => {
             let toread: Arc<Mutex<LinuxI2CDevice>> = Arc::new(Mutex::new(lid));
             let dev_version = mfi::cp2::read_key(Some(toread.clone()), String::from("device_version"));
@@ -37,17 +38,16 @@ fn post_coprocessor(dev: &str) {
                 _ => "(unknown version)"
             };
             log::info!("Connected to Authentication Coprocessor {}!\nFirmware Version: {:?}", pretty_version, firm_version[0]);
-            let cert = ret_cp_pubkey(Some(toread));
+            let cert = ret_cp_pubkey(Some(toread.clone()));
             log::info!("Coprocessor Certificate: {:?}", cert);
-            thread::sleep(Duration::from_millis(100));
-            let chal = mfi::cp2::rsa_sign(Some(toread), "12211213131231231231".as_bytes());
+            let chal = mfi::cp2::rsa_sign(Some(toread.clone()), "12211213131231231231".as_bytes());
             log::info!("Coprocessor Challenge Test Result: {:?}", chal.unwrap());
-            Some(lid)
+            //Some(lid)
         },
         Err(err) => {
             log::warn!("Error while connecting to Authentication Coprocessor @ {}:\n{:?}", dev, err);
             log::warn!("Please confirm you have a Coprocessor 2.0 (3959) or a Coprocessor 3.0 (0177), if you do not have either, use fake_mfi.");
-            None
+            //None
         },
     };
 }

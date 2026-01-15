@@ -45,9 +45,15 @@ fn wrapped_read_i2c(dev: &mut LinuxI2CDevice, addr: u8, n: usize) -> Vec<u8> {
 /// `dev1` - `Option>Arc<Mutex<LinuxI2CDevice?`
 /// `addr` - `u8` containing the read address
 /// `n` - `usize` containing the size to read
-fn wrapped_write_i2c(dev: &mut LinuxI2CDevice, addr: u8, data: Vec<u8>) {
-    dev.smbus_write_i2c_block_data(addr, data.as_slice());
+fn wrapped_write_i2c(dev: &mut LinuxI2CDevice, addr: u8, data: &[u8]) {
+    let mut buf = Vec::with_capacity(data.len() + 1);
+    buf.push(addr);
+    buf.extend_from_slice(data);
+
+    let mut msg = [LinuxI2CMessage::write(&buf).with_address(SLAVE_ADDR)];
+    dev.transfer(&mut msg).unwrap();
 }
+
 
 fn wrapped_read_byte(dev: &mut LinuxI2CDevice, register: u8) -> u8 {
     match dev.smbus_read_byte_data(register) {
@@ -61,7 +67,6 @@ fn wrapped_read_byte(dev: &mut LinuxI2CDevice, register: u8) -> u8 {
 
 pub fn read_key(dev: Option<Arc<Mutex<LinuxI2CDevice>>>, key: String) -> Vec<u8> {
     let mut dev2;
-    let mut dev1;
     match dev {
         Some(lid) => dev2=lid,
         None => panic!("This shouldn't happen, but Option<&mut LinuxI2CDevice> was None...")
@@ -70,13 +75,13 @@ pub fn read_key(dev: Option<Arc<Mutex<LinuxI2CDevice>>>, key: String) -> Vec<u8>
     let dv = String::from("device_version");
     let fv = String::from("firmware_version");
     {
-        dev1 = dev2.lock().unwrap();
+        let mut devv = dev2.lock().unwrap();
         match key {
             dv => {
-                data_read = dev1.smbus_read_byte_data(0x00);
+                data_read = devv.smbus_read_byte_data(0x00);
             },
             fv => {
-                data_read = dev1.smbus_read_byte_data(0x01);
+                data_read = devv.smbus_read_byte_data(0x01);
             }
         };
     }
@@ -117,8 +122,9 @@ pub fn rsa_sign(dev: Option<Arc<Mutex<LinuxI2CDevice>>>, msg: &[u8]) -> Result<V
     let mut dev2 = device_uw.lock().unwrap();
     let len = msg.len().to_be_bytes();
     let final_len: Vec<u8> = vec![len[0], len[1]];
-    wrapped_write_i2c(&mut dev2, 0x20, final_len);
-    wrapped_write_i2c(&mut dev2, 0x21, msg.to_vec());
+    wrapped_write_i2c(&mut dev2, 0x20, final_len.as_slice());
+    thread::sleep(Duration::from_millis(10));
+    wrapped_write_i2c(&mut dev2, 0x21, msg);
     dev2.smbus_write_byte_data(0x10, 0x01);
     thread::sleep(Duration::from_millis(10));
     for num in 0..10 {
@@ -131,7 +137,7 @@ pub fn rsa_sign(dev: Option<Arc<Mutex<LinuxI2CDevice>>>, msg: &[u8]) -> Result<V
             Err(e) => {
                 thread::sleep(Duration::from_millis(100));
                 if num == 9 {
-                    panic!("Timeout while reading Coprocessor, the last bit on register 0x10 (Authentication Control and Status) was: {}", bit);
+                    panic!("Timeout while reading Coprocessor, or error: {:?}", e);
                 }
                 continue;
             }
@@ -139,6 +145,7 @@ pub fn rsa_sign(dev: Option<Arc<Mutex<LinuxI2CDevice>>>, msg: &[u8]) -> Result<V
     };
     log::info!("Coprocessor successfully signed challenge!");
     let size = wrapped_read_i2c(&mut dev2, 0x11, 2);
+    thread::sleep(Duration::from_millis(10));
     let size_translation: [u8; 2] = [size[0], size[1]];
     let final_size = u16::from_be_bytes(size_translation);
     let end = wrapped_read_i2c(&mut dev2, 0x12, final_size.try_into().unwrap());
