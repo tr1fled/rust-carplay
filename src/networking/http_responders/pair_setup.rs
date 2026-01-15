@@ -128,6 +128,7 @@ fn get_i2c_dev(dev: &str) -> Option<Arc<Mutex<LinuxI2CDevice>>> {
         Ok(lid) => {
             opt = Some(Arc::new(Mutex::new(lid)));
             let dev_version = read_key(opt.clone(), String::from("device_version"));
+            thread::sleep(Duration::from_millis(10));
             let firm_version = read_key(opt.clone(), String::from("firmware_version"));
             let pretty_version = match dev_version[0] {
                 0x05 => "2.0C",

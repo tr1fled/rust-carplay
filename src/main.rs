@@ -29,6 +29,7 @@ fn post_coprocessor(dev: &str) {
         Ok(lid) => {
             let toread: Arc<Mutex<LinuxI2CDevice>> = Arc::new(Mutex::new(lid));
             let dev_version = mfi::cp2::read_key(Some(toread.clone()), String::from("device_version"));
+            thread::sleep(Duration::from_millis(10));
             let firm_version = mfi::cp2::read_key(Some(toread.clone()), String::from("firmware_version"));
             let pretty_version = match dev_version[0] {
                 0x05 => "2.0C",
@@ -38,6 +39,7 @@ fn post_coprocessor(dev: &str) {
             log::info!("Connected to Authentication Coprocessor {}!\nFirmware Version: {:?}", pretty_version, firm_version[0]);
             let cert = ret_cp_pubkey(Some(toread));
             log::info!("Coprocessor Certificate: {:?}", cert);
+            thread::sleep(Duration::from_millis(100));
             let chal = mfi::cp2::rsa_sign(Some(toread), "12211213131231231231".as_bytes());
             log::info!("Coprocessor Challenge Test Result: {:?}", chal.unwrap());
             Some(lid)

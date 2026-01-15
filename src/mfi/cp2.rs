@@ -120,16 +120,16 @@ pub fn rsa_sign(dev: Option<Arc<Mutex<LinuxI2CDevice>>>, msg: &[u8]) -> Result<V
     wrapped_write_i2c(&mut dev2, 0x20, final_len);
     wrapped_write_i2c(&mut dev2, 0x21, msg.to_vec());
     dev2.smbus_write_byte_data(0x10, 0x01);
-    thread::sleep(Duration::from_millis(1));
+    thread::sleep(Duration::from_millis(10));
     for num in 0..10 {
         let bit = match dev2.smbus_read_byte_data(0x10) {
             Ok(data) => {
                 if data == 0x10 { break }
-                thread::sleep(Duration::from_millis(10));
+                thread::sleep(Duration::from_millis(100));
                 data
             },
             Err(e) => {
-                thread::sleep(Duration::from_millis(10));
+                thread::sleep(Duration::from_millis(100));
                 if num == 9 {
                     panic!("Timeout while reading Coprocessor, the last bit on register 0x10 (Authentication Control and Status) was: {}", bit);
                 }
