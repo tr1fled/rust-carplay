@@ -90,7 +90,7 @@ pub struct Session {
     pub read_counter: u64,
     pub write_counter: u64,
     #[cfg(any(target_os = "linux", target_os = "android"))]
-    pub i2c_device: Option<&mut LinuxI2CDevice>,
+    pub i2c_device: Option<Arc<Mutex<LinuxI2CDevice>>>,
 }
 
 impl Session {
@@ -122,13 +122,13 @@ impl Session {
 unsafe impl Send for Session {}
 
 //#[cfg(any(target_os = "linux", target_os = "android"))]
-fn get_i2c_dev(dev: &str) -> Option<&mut LinuxI2CDevice> {
-    let mut opt: Option<&mut LinuxI2CDevice>;
+fn get_i2c_dev(dev: &str) -> Option<Arc<Mutex<LinuxI2CDevice>>> {
+    let mut opt: Option<Arc<Mutex<LinuxI2CDevice>>>;
     match LinuxI2CDevice::new(dev, 0x10) {
         Ok(lid) => {
-            opt = Some(&mut lid);
-            let dev_version = read_key(&opt, String::from("device_version"));
-            let firm_version = read_key(&opt, String::from("firmware_version"));
+            opt = Some(Arc::new(Mutex::New(lid)));
+            let dev_version = read_key(opt.clone(), String::from("device_version"));
+            let firm_version = read_key(opt.clone(), String::from("firmware_version"));
             let pretty_version = match dev_version[0] {
                 0x05 => "2.0C",
                 0x07 => "3.0",
