@@ -80,7 +80,13 @@ pub fn read_key(dev: Option<Arc<Mutex<LinuxI2CDevice>>>, key: String) -> Vec<u8>
             }
         };
     }
-    data_read.vec
+    match data_read {
+        Ok(d) => vec![d],
+        Err(error) => {
+            log::error!("Error while reading i2c key!\nKey: {}\nError: {:?}", key, error);
+            vec![0x00]
+        }
+    }
 }
 
 pub fn ret_cp_pubkey(dev: Option<Arc<Mutex<LinuxI2CDevice>>>) -> Vec<u8> {
