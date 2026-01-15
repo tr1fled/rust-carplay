@@ -130,11 +130,12 @@ pub fn rsa_sign(dev: Option<Arc<Mutex<LinuxI2CDevice>>>, msg: &[u8]) -> Result<V
             },
             Err(e) => {
                 thread::sleep(Duration::from_millis(10));
+                if num == 9 {
+                    panic!("Timeout while reading Coprocessor, the last bit on register 0x10 (Authentication Control and Status) was: {}", bit);
+                }
+                continue;
             }
         };
-        if num == 9 {
-            panic!("Timeout while reading Coprocessor, the last bit on register 0x10 (Authentication Control and Status) was: {}", bit);
-        }
     };
     log::info!("Coprocessor successfully signed challenge!");
     let size = wrapped_read_i2c(&mut dev2, 0x11, 2);
