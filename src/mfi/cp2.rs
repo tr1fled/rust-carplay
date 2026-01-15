@@ -15,35 +15,41 @@ const SLAVE_ADDR: u16 = 0x10;
 
 /// Read the Coprocessor
 /// # Arguments
-/// `dev1` - `&Option<LinuxI2CDevice?`
+/// `dev1` - `&Option<&mut LinuxI2CDevice?`
 /// `addr` - `u8` containing the read address
 /// `n` - `usize` containing the size to read
-fn wrapped_read_i2c(dev1: &Option<LinuxI2CDevice>, addr: u8, n: usize) -> Vec<u8> {
+fn wrapped_read_i2c(dev1: &Option<&mut LinuxI2CDevice>, addr: u8, n: usize) -> Vec<u8> {
     let mut dev;
     match dev1 {
         Some(lid) => dev=lid,
-        None => panic!("This shouldn't happen, but Option<LinuxI2CDevice> was None...")
+        None => panic!("This shouldn't happen, but Option<&mut LinuxI2CDevice> was None...")
     }
     let mut to_ret: Vec<u8> = Vec::with_capacity(n);
     let mut msgs = [
         LinuxI2CMessage::write(&[addr]).with_address(SLAVE_ADDR),
         LinuxI2CMessage::read(to_ret.as_mut_slice()).with_address(SLAVE_ADDR)
     ];
-    dev.transfer(&mut msgs)?;
+    match dev.transfer(&mut msgs) {
+        Ok(_) => {},
+        Err(e) => {
+            log::error!("Error while doing a wrapped i2c read! Error is: {:?}", e);
+            to_ret = vec![0]
+        }
+    }
 
     to_ret
 }
 
 /// Write the Coprocessor
 /// # Arguments
-/// `dev1` - `&Option<LinuxI2CDevice?`
+/// `dev1` - `&Option<&mut LinuxI2CDevice?`
 /// `addr` - `u8` containing the read address
 /// `n` - `usize` containing the size to read
-fn wrapped_write_i2c(dev1: &Option<LinuxI2CDevice>, addr: u8, data: Vec<u8>) {
+fn wrapped_write_i2c(dev1: &Option<&mut LinuxI2CDevice>, addr: u8, data: Vec<u8>) {
     let mut dev;
     match dev1 {
         Some(lid) => dev=lid,
-        None => panic!("This shouldn't happen, but Option<LinuxI2CDevice> was None...")
+        None => panic!("This shouldn't happen, but Option<&mut LinuxI2CDevice> was None...")
     }
     dev.smbus_write_i2c_block_data(addr, data.as_slice());
 }
@@ -58,25 +64,27 @@ fn wrapped_read_byte(dev: &LinuxI2CDevice, register: u8) -> u8 {
     }
 }
 
-pub fn read_key(dev: &Option<LinuxI2CDevice>, key: String) -> Vec<u8> {
+pub fn read_key(dev: &Option<&mut LinuxI2CDevice>, key: String) -> Vec<u8> {
     let mut dev1: &LinuxI2CDevice;
     match dev {
         Some(lid) => dev1=lid,
-        None => panic!("This shouldn't happen, but Option<LinuxI2CDevice> was None...")
+        None => panic!("This shouldn't happen, but Option<&mut LinuxI2CDevice> was None...")
     }
     let mut data_read;
+    let dv = String::from("device_version");
+    let fv = String::from("firmware_version");
     match key {
-        String::from("device_version") => {
+        dv => {
             data_read = dev1.smbus_read_byte_data(0x00);
         },
-        String::from("firmware_version") => {
+        fv => {
             data_read = dev1.smbus_read_byte_data(0x01);
         }
     };
     data_read.vec
 }
 
-pub fn ret_cp_pubkey(dev: &Option<LinuxI2CDevice>) -> Vec<u8> {
+pub fn ret_cp_pubkey(dev: &Option<&mut LinuxI2CDevice>) -> Vec<u8> {
     // Endianness: Big Endian (for things like: registers holding length in two bytes)
     if dev.is_none() {
         log::warn!("You are currently using the cp2 module for authentication, but no Coprocessor was found! Falling back to fake_mfi");
@@ -89,7 +97,7 @@ pub fn ret_cp_pubkey(dev: &Option<LinuxI2CDevice>) -> Vec<u8> {
 }
 
 // Sign message with the embedded memory key
-pub fn rsa_sign(dev: &Option<LinuxI2CDevice>, msg: &[u8]) -> Result<Vec<u8>, ()> {
+pub fn rsa_sign(dev: &Option<&mut LinuxI2CDevice>, msg: &[u8]) -> Result<Vec<u8>, ()> {
     let mut dev1;
     match dev {
         Some(lid) => dev1=lid,
