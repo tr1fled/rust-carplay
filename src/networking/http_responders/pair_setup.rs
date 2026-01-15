@@ -31,9 +31,13 @@ use crate::parsing::http::{
 };
 use crate::srp::bindings::*;
 // change as you wish, since we do not have an mfi chip we will 'troll' apple
-use crate::mfi::fake_mfi;
+use crate::mfi::cp2;
+use crate::mfi::cp2::read_key;
 use crate::persister::{self, CFG_ED25519_PK, CFG_ED25519_SK, CFG_PAIRING_IDENTITY};
 use num_bigint::BigUint;
+use i2cdev::core::*;
+#[cfg(any(target_os = "linux", target_os = "android"))]
+use i2cdev::linux::{LinuxI2CDevice, LinuxI2CError, LinuxI2CMessage};
 
 
 // thanks tim apple for the spacings and all
@@ -85,6 +89,8 @@ pub struct Session {
     pub encrypted : bool,
     pub read_counter: u64,
     pub write_counter: u64,
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    pub i2c_device: Option<LinuxI2CDevice>,
 }
 
 impl Session {
@@ -108,10 +114,36 @@ impl Session {
             encrypted: false,
             read_counter: 0,
             write_counter: 0,
+            #[cfg(any(target_os = "linux", target_os = "android"))]
+            i2c_device: get_i2c_dev("/dev/i2c-1"),
         }
     }
 }
 unsafe impl Send for Session {}
+
+//#[cfg(any(target_os = "linux", target_os = "android"))]
+fn get_i2c_dev(dev: &str) -> Option<LinuxI2CDevice> {
+    let mut opt: Option<LinuxI2CDevice>;
+    match LinuxI2CDevice::new(dev, 0x10) {
+        Ok(lid) => {
+            opt = Some(lid);
+            let dev_version = read_key(&opt, String::from("device_version"));
+            let firm_version = read_key(&opt, String::from("firmware_version"));
+            let pretty_version = match dev_version[0] {
+                0x05 => "2.0C",
+                0x07 => "3.0",
+                _ => "(unknown version)"
+            };
+            log::info!("Connected to Authentication Coprocessor {}!\nFirmware Version: {:?}", pretty_version);
+        },
+        Err(err) => {
+            opt = None;
+            log::warn!("Error while connecting to Authentication Coprocessor @ {}:\n{:?}", dev, err);
+            log::warn!("Please confirm you have a Coprocessor 2.0 (3959) or a Coprocessor 3.0 (0177), if you do not have either, use fake_mfi.")
+        },
+    }
+    opt
+}
 
 /// Encrypts data using 32-byte key + 8-byte nonce (like chacha20_poly1305_encrypt_all_64x64)
 fn chacha20_poly1305_encrypt_all_64x64(
@@ -347,13 +379,17 @@ pub fn handle_m3(data: Vec<TlvField>, pair_session: &mut Session) -> Vec<u8> {
     
     let mut hasher = Sha1::new();
     hasher.update(msg);
-    let signature = fake_mfi::rsa_sign(hasher.finalize().as_slice()).expect("Error signing with MFi");
+    let signature = cp2::rsa_sign(&pair_session.i2c_device, hasher.finalize().as_slice()).expect("Error signing with MFi");
+    let mut i2cd;
+    if pair_session.i2c_device.is_some() {
+        i2cd = &pair_session.i2c_device;
+    }
     let encryptedfields = vec![
     // Signature
     TlvField { field_type: kTLVType_Signature, data: signature },
     
     // MFi IC Certificate
-    TlvField { field_type: kTLVType_Certificate, data: fake_mfi::ret_cp_pubkey() },
+    TlvField { field_type: kTLVType_Certificate, data: cp2::ret_cp_pubkey(i2cd) },
     ];
     let nonce = b"PS-Msg04"; // exactly 8 bytes
     let (mut ciphertext, tag) = chacha20_poly1305_encrypt_all_64x64(&pair_session.encrypt_key, &nonce, tlv_marshal(&encryptedfields).as_slice(), None);

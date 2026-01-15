@@ -30,7 +30,7 @@ use crate::ssl::bindings::{self, SHA1_Final, SHA1_Init, SHA1_Update, SHA_CTX};
 use crate::ctr::bindings::{AES_CTR_Init, AES_CTR_Update, AES_CTR_Final, AES_CTR_Context};
 use crate::networking::http_responders::pair_setup::Session;
 // change as you wish, since we do not have an mfi chip we will 'troll' apple
-use crate::mfi::fake_mfi::{self, ret_cp_pubkey};
+use crate::mfi::cp2::{self, ret_cp_pubkey};
 use crate::persister::{self, CFG_ED25519_PK, CFG_ED25519_SK, CFG_PAIRING_IDENTITY};
 use std::ffi::{CStr, CString};
 
@@ -177,8 +177,9 @@ fn handle_m1(data: Vec<u8>, pair_session: &mut Session) -> Vec<u8> {
         SHA1_Final(sig_in.as_mut_ptr(), sha1_ctx.as_mut_ptr());
     }
     // sign with mfi
-    let cert = ret_cp_pubkey();
-    let mut signature = fake_mfi::rsa_sign(&sig_in).expect("Error signing with MFi");
+    let mut i2cd= &pair_session.i2c_device;
+    let cert = ret_cp_pubkey(i2cd);
+    let mut signature = cp2::rsa_sign(&pair_session.i2c_device, &sig_in).expect("Error signing with MFi");
     let mut signature_out = vec![0u8; signature.len()];
     unsafe {
         println!("Beginning AES process");

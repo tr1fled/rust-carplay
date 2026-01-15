@@ -22,7 +22,8 @@ use crate::parsing::http::{
 use x25519_dalek::{PublicKey, StaticSecret};
 use ed25519_dalek::*;
 // change as you wish, since we do not have an mfi chip we will 'troll' apple
-use crate::mfi::fake_mfi::*;
+//use crate::mfi::fake_mfi::*;
+use crate::mfi::cp2::*;
 use crate::persister::{self, CFG_ED25519_PK, CFG_ED25519_SK, CFG_PAIRING_IDENTITY};
 use crate::networking::http_responders::pair_setup::Session;
 

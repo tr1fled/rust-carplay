@@ -32,6 +32,7 @@ gst_video = { package = "gstreamer-video", version = "0.24.3", features = ["v1_2
 gst_app = {package = "gstreamer-app", version = "0.24.2"}
 gtk = { version = "0.10.2", package = "gtk4" }
 gst_sys = { package = "gstreamer-sys", version = "0.24.2", features = ["v1_22"] }
+i2cdev = "0.6.2"
 
 [build-dependencies]
 cc = "1.2.40"
