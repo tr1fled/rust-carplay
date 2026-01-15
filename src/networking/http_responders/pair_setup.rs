@@ -115,7 +115,7 @@ impl Session {
             read_counter: 0,
             write_counter: 0,
             #[cfg(any(target_os = "linux", target_os = "android"))]
-            i2c_device: get_i2c_dev("/dev/i2c-1"),
+            i2c_device: get_i2c_dev("/dev/i2c-2"),
         }
     }
 }

@@ -52,7 +52,7 @@
 	
 	Linux platform plugin for MFi-SAP authentication/encryption.
 	
-	This defaults to using i2c bus /dev/i2c-1 with an MFi auth IC device address of 0x11 (RST pulled high).
+	This defaults to using i2c bus /dev/i2c-2 with an MFi auth IC device address of 0x11 (RST pulled high).
 	These can be overridden in the makefile with the following:
 	
 	CFLAGS += -DMFI_AUTH_DEVICE_PATH=\"/dev/i2c-0\"		# MFi auth IC on i2c bus /dev/i2c-0.
@@ -90,7 +90,7 @@
 #if( defined( MFI_AUTH_DEVICE_PATH ) )
 	#define kMFiAuthDevicePath					MFI_AUTH_DEVICE_PATH
 #else
-	#define kMFiAuthDevicePath					"/dev/i2c-1"
+	#define kMFiAuthDevicePath					"/dev/i2c-2"
 #endif
 
 #if( defined( MFI_AUTH_DEVICE_ADDRESS ) )

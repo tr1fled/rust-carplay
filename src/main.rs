@@ -39,6 +39,7 @@ fn post_coprocessor(dev: &str) {
             log::info!("Connected to Authentication Coprocessor {}!\nFirmware Version: {:?}", pretty_version, firm_version[0]);
             let cert = ret_cp_pubkey(Some(toread.clone()));
             log::info!("Coprocessor Certificate: {:?}", cert);
+            thread::sleep(Duration::from_millis(10));
             let chal = mfi::cp2::rsa_sign(Some(toread.clone()), "12211213131231231231".as_bytes());
             log::info!("Coprocessor Challenge Test Result: {:?}", chal.unwrap());
             //Some(lid)
