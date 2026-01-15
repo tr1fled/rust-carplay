@@ -20,8 +20,9 @@ const SLAVE_ADDR: u16 = 0x10;
 /// `n` - `usize` containing the size to read
 fn wrapped_read_i2c(dev: &mut LinuxI2CDevice, addr: u8, n: usize) -> Vec<u8> {
     let mut to_ret: Vec<u8> = Vec::with_capacity(n);
+    let data = [addr];
     let mut msgs = [
-    LinuxI2CMessage::write(&[addr]).with_address(SLAVE_ADDR),
+    LinuxI2CMessage::write(&data).with_address(SLAVE_ADDR),
     LinuxI2CMessage::read(to_ret.as_mut_slice()).with_address(SLAVE_ADDR)
     ];
     match dev.transfer(&mut msgs) {

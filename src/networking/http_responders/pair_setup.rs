@@ -126,7 +126,7 @@ fn get_i2c_dev(dev: &str) -> Option<Arc<Mutex<LinuxI2CDevice>>> {
     let mut opt: Option<Arc<Mutex<LinuxI2CDevice>>>;
     match LinuxI2CDevice::new(dev, 0x10) {
         Ok(lid) => {
-            opt = Some(Arc::new(Mutex::New(lid)));
+            opt = Some(Arc::new(Mutex::new(lid)));
             let dev_version = read_key(opt.clone(), String::from("device_version"));
             let firm_version = read_key(opt.clone(), String::from("firmware_version"));
             let pretty_version = match dev_version[0] {
