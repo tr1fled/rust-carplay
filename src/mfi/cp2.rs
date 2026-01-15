@@ -111,12 +111,9 @@ pub fn ret_cp_pubkey(dev: Option<Arc<Mutex<LinuxI2CDevice>>>) -> Vec<u8> {
 pub fn rsa_sign(dev: Option<Arc<Mutex<LinuxI2CDevice>>>, msg: &[u8]) -> Result<Vec<u8>, ()> {
     let mut dev2;
     let mut dev1;
-    match dev {
-        Some(lid) => dev1=lid,
-        None => {
-            log::warn!("You are currently using the cp2 module for authentication, but no Coprocessor was found! Falling back to fake_mfi");
-            return rsa_sign_fake(msg)
-        }
+    if dev.is_none() {
+        log::warn!("You are currently using the cp2 module for authentication, but no Coprocessor was found! Falling back to fake_mfi");
+        return rsa_sign_fake(msg)
     }
     dev2 = dev.unwrap().lock().unwrap();
     let len = msg.len().to_be_bytes();
