@@ -123,10 +123,11 @@ pub fn rsa_sign(dev: Option<Arc<Mutex<LinuxI2CDevice>>>, msg: &[u8]) -> Result<V
     let len = msg.len().to_be_bytes();
     let final_len: Vec<u8> = vec![len[0], len[1]];
     wrapped_write_i2c(&mut dev2, 0x20, final_len.as_slice());
-    thread::sleep(Duration::from_millis(10));
+    thread::sleep(Duration::from_millis(50));
     wrapped_write_i2c(&mut dev2, 0x21, msg);
+    thread::sleep(Duration::from_millis(50));
     dev2.smbus_write_byte_data(0x10, 0x01);
-    thread::sleep(Duration::from_millis(10));
+    thread::sleep(Duration::from_millis(50));
     for num in 0..10 {
         let bit = match dev2.smbus_read_byte_data(0x10) {
             Ok(data) => {
