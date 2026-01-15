@@ -134,7 +134,7 @@ fn get_i2c_dev(dev: &str) -> Option<Arc<Mutex<LinuxI2CDevice>>> {
                 0x07 => "3.0",
                 _ => "(unknown version)"
             };
-            log::info!("Connected to Authentication Coprocessor {}!\nFirmware Version: {:?}", pretty_version);
+            log::info!("Connected to Authentication Coprocessor {}!\nFirmware Version: {:?}", pretty_version, firm_version[0]);
         },
         Err(err) => {
             opt = None;
@@ -379,17 +379,13 @@ pub fn handle_m3(data: Vec<TlvField>, pair_session: &mut Session) -> Vec<u8> {
     
     let mut hasher = Sha1::new();
     hasher.update(msg);
-    let signature = cp2::rsa_sign(&pair_session.i2c_device, hasher.finalize().as_slice()).expect("Error signing with MFi");
-    let mut i2cd;
-    if pair_session.i2c_device.is_some() {
-        i2cd = &pair_session.i2c_device;
-    }
+    let signature = cp2::rsa_sign(Arc::Clone(pair_session.i2c_device), hasher.finalize().as_slice()).expect("Error signing with MFi");
     let encryptedfields = vec![
     // Signature
     TlvField { field_type: kTLVType_Signature, data: signature },
     
     // MFi IC Certificate
-    TlvField { field_type: kTLVType_Certificate, data: cp2::ret_cp_pubkey(i2cd) },
+    TlvField { field_type: kTLVType_Certificate, data: cp2::ret_cp_pubkey(Arc::Clone(pair_session.i2c_device)) },
     ];
     let nonce = b"PS-Msg04"; // exactly 8 bytes
     let (mut ciphertext, tag) = chacha20_poly1305_encrypt_all_64x64(&pair_session.encrypt_key, &nonce, tlv_marshal(&encryptedfields).as_slice(), None);

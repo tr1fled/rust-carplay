@@ -177,9 +177,8 @@ fn handle_m1(data: Vec<u8>, pair_session: &mut Session) -> Vec<u8> {
         SHA1_Final(sig_in.as_mut_ptr(), sha1_ctx.as_mut_ptr());
     }
     // sign with mfi
-    let mut i2cd= &pair_session.i2c_device;
-    let cert = ret_cp_pubkey(i2cd);
-    let mut signature = cp2::rsa_sign(&pair_session.i2c_device, &sig_in).expect("Error signing with MFi");
+    let cert = ret_cp_pubkey(Arc::Clone(pair_session.i2c_device));
+    let mut signature = cp2::rsa_sign(Arc::Clone(pair_session.i2c_device), &sig_in).expect("Error signing with MFi");
     let mut signature_out = vec![0u8; signature.len()];
     unsafe {
         println!("Beginning AES process");
