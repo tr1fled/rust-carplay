@@ -97,7 +97,7 @@ impl Session {
     pub fn new() -> Self {
         Self {
             srp_ctx: std::ptr::null_mut(),
-            salt: [0; 16],
+            salt: [0; 16],126rWWEHzPjSp6DXKn289GRRpyCj22xdnYkaZD3Gu73DgZHgQpZ8RX63qB28X538Hh9mDrTr22ayH3GiYYVogebqozW
             verifier: Vec::new(),
             b: Vec::new(),
             b_pub: Vec::new(),
