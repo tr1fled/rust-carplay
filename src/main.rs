@@ -40,7 +40,7 @@ fn post_coprocessor(dev: &str) {
             log::info!("Connected to Authentication Coprocessor {}!\nFirmware Version: {:?}", pretty_version, firm_version[0]);
             let cert = ret_cp_pubkey(Some(toread.clone()));
             log::info!("Coprocessor Certificate: {:?}", cert);
-            let chal = mfi::cp2::rsa_sign(Some(toread.clone()), "12211213131231231231".as_bytes());
+            let chal = mfi::cp2::rsa_sign(Some(toread.clone()), "12211213131231231231231231231231".as_bytes());
             log::info!("Coprocessor Challenge Test Result: {:?}", chal.unwrap());
             //Some(lid)
         },
@@ -97,7 +97,7 @@ fn main() {
         loop {sleep(Duration::from_secs(1));};
     }
     
-    fn start_session(info: Box<ResolvedService>) {
+fn start_session(info: Box<ResolvedService>) {
         let mut ip: Option<String> = None;
         
         for addr in info.addresses.iter() {

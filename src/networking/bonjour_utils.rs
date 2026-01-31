@@ -25,8 +25,8 @@ pub fn advertise(mdns: Arc<ServiceDaemon>) {
     log::trace!("Registering Airplay server via mDNS");
     let service_type = "_airplay._tcp.local.";
     let instance_name = "cp";
-    let ip = "192.168.4.1";
-    let service_hostname = "192.168.4.1.local.";
+    let ip = "192.168.42.1";
+    let service_hostname = "192.168.42.1.local.";
     let port = 7000;
     let pi: String;
     match persister::read_key(CFG_PAIRING_IDENTITY) {
