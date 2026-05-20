@@ -1,4 +1,3 @@
-// "The persister", that name sounds like some guy in a dark room, kinda like a receptionist ready to save every folder you throw at it
 use dirs;
 use std::path::PathBuf;
 use std::fs;
