@@ -183,6 +183,7 @@ pub fn rsa_sign(dev: Option<Arc<Mutex<LinuxI2CDevice>>>, msg: &[u8]) -> Result<V
 
     let mut signature: Vec<u8> = vec![];
         for num in 1..10 {
+            println!("matching i2c read for rsa result");
         match wrapped_read_i2c(&mut dev2, 0x12, datalength) {
             Ok(st) => {
                 signature = st;

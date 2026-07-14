@@ -13,7 +13,7 @@ use std::{
 };
 use gst::{Buffer, prelude::*};
 use gtk::prelude::*;
-use std::sync::mpsc::Sender;
+use std::sync::mpsc::{Receiver, Sender};
 use gtk::{Button, ApplicationWindow, Box, Orientation, gdk, gio, glib, GestureClick, EventControllerMotion};
 use std::rc::Rc;
 use std::cell::Cell;
@@ -44,7 +44,7 @@ pub struct GstSinkData {
 #[derive(Clone)]
 struct ThrottledSender {
     latest: Rc<RefCell<Option<EventSessionMessage>>>,
-    tx: Sender<EventSessionMessage>,
+    tx: Arc<Sender<EventSessionMessage>>,
 }
 
 
@@ -66,7 +66,7 @@ impl SetNightMode {
     }
 }
 
-fn new_throttled_sender(tx: Sender<EventSessionMessage>) -> ThrottledSender {
+fn new_throttled_sender(tx: Arc<Sender<EventSessionMessage>>) -> ThrottledSender {
     let latest = Rc::new(RefCell::new(None));
     let latest_clone = latest.clone();
     let tx_clone = tx.clone();
@@ -82,7 +82,7 @@ fn new_throttled_sender(tx: Sender<EventSessionMessage>) -> ThrottledSender {
     ThrottledSender { latest, tx }
 }
 
-fn setup_mouse_handlers(widget: &RenderWidget, transmitter: Sender<EventSessionMessage>) {
+fn setup_mouse_handlers(widget: &RenderWidget, transmitter: Arc<Sender<EventSessionMessage>>) {
     // Shared state: is the left mouse button down?
     let mouse_down = Rc::new(Cell::new(false));
     
@@ -141,35 +141,42 @@ fn setup_mouse_handlers(widget: &RenderWidget, transmitter: Sender<EventSessionM
     widget.add_controller(motion);
 }
 
-fn create_ui(app: &gtk::Application, airplay_session: Arc<Mutex<AirplaySession>>) {
+fn create_ui(app: &gtk::Application, tx: Arc<Sender<EventSessionMessage>>, src: Arc<AppSrc>) {
     let pipeline = gst::Pipeline::new();
     
     let h264parse = gst::ElementFactory::make("h264parse").build().unwrap();
-    let decoder   = gst::ElementFactory::make("decodebin").build().unwrap();
-    let convert   = gst::ElementFactory::make("videoconvert").build().unwrap();
+    let decoder   = gst::ElementFactory::make("v4l2h264dec").build().unwrap();
+    let convert   = gst::ElementFactory::make("v4l2convert").build().unwrap();
     let gtksink   = gst::ElementFactory::make("gtk4paintablesink").build().unwrap();
+    let queue = gst::ElementFactory::make("queue").build().unwrap();
+
+    queue.set_property("max-size-buffers", 1u32);
+    queue.set_property("max-size-bytes", 0u32);
+    queue.set_property("max-size-time", 0u64);
+    queue.set_property_from_str("leaky", "downstream");
     //let queue = gst::ElementFactory::make("queue").build().unwrap();
     
-    let paintable = gtksink.property::<gdk::Paintable>("paintable");
+    src.set_property("is-live", true);
+    src.set_property("do-timestamp", true);
+    src.set_property("format", gst::Format::Time);
+    src.set_property("block", true);
+    src.set_property("max-buffers", 1u64);
+    
     gtksink.set_property("sync", &false);
     gtksink.set_property("max-lateness", &(-1i64));
     //appsrc.push_buffer(Buffer::from_slice(slice));
     let mut sinkdata: Arc<Mutex<GstSinkData>>;
     {
-        sinkdata = airplay_session.lock().unwrap().sink.as_ref().expect("Sink is none! Please fix.").clone();
-    }
-    {
-        let guard = sinkdata.lock().unwrap();
-        let src = guard.data_sink.as_ref().expect("shouldn't be none");
         
         let caps = gst::Caps::builder("video/x-h264")
         .field("stream-format", "byte-stream")   // annex-b
         .field("alignment", "au")                // important
+        //.field("framerate", gst::Fraction::new(30, 1))
         .build();
         src.set_caps(Some(&caps));
         
         pipeline
-        .add_many([src.upcast_ref(), &h264parse, &decoder, &convert, &gtksink])
+        .add_many([src.upcast_ref(), &queue, &h264parse, &decoder, &convert, &gtksink])
         //.add_many([src.upcast_ref(), &queue, &h264parse, &decoder, &convert, &gtksink])
         .unwrap();
         
@@ -177,35 +184,9 @@ fn create_ui(app: &gtk::Application, airplay_session: Arc<Mutex<AirplaySession>>
         //src.link(&queue).unwrap();
         //queue.link(&h264parse).unwrap();
         src.link(&h264parse).unwrap();
+        //queue.link(&h264parse).unwrap();
         h264parse.link(&decoder).unwrap();
-        
-        let convert_clone = convert.clone();
-        
-        decoder.connect_pad_added(move |dbin, src_pad| {
-            println!("decodebin added pad {:?}", src_pad);
-            
-            // Get the sink pad from videoconvert
-            let sink_pad = match convert_clone.static_pad("sink") {
-                Some(p) => p,
-                None => {
-                    eprintln!("videoconvert has no sink pad!");
-                    return;
-                },
-            };
-            
-            if sink_pad.is_linked() {
-                println!("sink pad already linked");
-                return;
-            }
-            
-            // Try linking dynamic decodebin pad to videoconvert
-            match src_pad.link(&sink_pad) {
-                Ok(_) => println!("Linked decodebin → videoconvert"),
-                Err(err) => eprintln!("Failed to link decodebin src pad: {:?}", err),
-            }
-        });
-        
-        // Now link convert → gtksink
+        decoder.link(&convert).unwrap();
         convert.link(&gtksink).unwrap();
     }
     
@@ -215,12 +196,6 @@ fn create_ui(app: &gtk::Application, airplay_session: Arc<Mutex<AirplaySession>>
     let vbox = gtk::Box::new(gtk::Orientation::Vertical, 0);
     
     let gst_widget = gstgtk4::RenderWidget::new(&gtksink);
-    let tx = loop {
-        match airplay_session.lock().unwrap().event_channel.as_ref() {
-            Some(ec) => break ec.clone(),
-            None => {thread::sleep(Duration::from_millis(200)); continue;},
-        }
-    };
     setup_mouse_handlers(&gst_widget, tx.clone());
     vbox.append(&gst_widget);
     
@@ -347,7 +322,7 @@ fn create_ui(app: &gtk::Application, airplay_session: Arc<Mutex<AirplaySession>>
     app.add_window(&window2);
 }
 
-pub fn init_sink(some_data: Arc<Mutex<AirplaySession>>) -> glib::ExitCode {
+pub fn init_sink(tx: Arc<Sender<EventSessionMessage>>, src: Arc<AppSrc>) -> glib::ExitCode {
     gtk::init().unwrap();
     gstgtk4::plugin_register_static().expect("Failed to register gstgtk4 plugin");
     
@@ -356,7 +331,7 @@ pub fn init_sink(some_data: Arc<Mutex<AirplaySession>>) -> glib::ExitCode {
     // init ui
     app.connect_activate(move |app| {
         // call create_ui with the extra argument
-        create_ui(app, some_data.clone());
+        create_ui(app, Arc::clone(&tx), Arc::clone(&src));
     });
     let res = app.run();
     

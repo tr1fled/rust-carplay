@@ -15,6 +15,7 @@ use std::sync::{Arc, Mutex};
 use std::ffi::{CStr, CString};
 use libc::size_t;
 use log;
+use openssl::sha::Sha256;
 use rand::{rngs::OsRng, RngCore};
 use sha2::{Sha512};
 use sha1::{Digest, Sha1};
@@ -117,7 +118,7 @@ impl Session {
             read_counter: 0,
             write_counter: 0,
             #[cfg(any(target_os = "linux", target_os = "android"))]
-            i2c_device: get_i2c_dev("/dev/i2c-"),
+            i2c_device: get_i2c_dev("/dev/i2c-3"),
         }
     }
 }
@@ -379,16 +380,17 @@ pub fn handle_m3(data: Vec<TlvField>, pair_session: &mut Session) -> Vec<u8> {
     Hkdf::<Sha512>::new(Some(&kMFiPairSetupSaltPtr), &pair_session.shared_secret)
     .expand(kMFiPairSetupInfoPtr, &mut pair_session.mfi_encrypt_key)
     .expect("Error found in HKDF process");
-    
-    let mut hasher = Sha1::new();
-    hasher.update(msg);
-    let signature = cp2::rsa_sign(pair_session.i2c_device.clone(), hasher.finalize().as_slice()).expect("Error signing with MFi");
+
+    let signature = cp2::rsa_sign(pair_session.i2c_device.clone(), &msg).expect("Error signing with MFi");
+    println!("{:#?}", signature);
+    let pk = cp2::ret_cp_pubkey(pair_session.i2c_device.clone());
+    println!("{:?}", pk);
     let encryptedfields = vec![
     // Signature
     TlvField { field_type: kTLVType_Signature, data: signature },
     
     // MFi IC Certificate
-    TlvField { field_type: kTLVType_Certificate, data: cp2::ret_cp_pubkey(pair_session.i2c_device.clone()) },
+    TlvField { field_type: kTLVType_Certificate, data: pk },
     ];
     let nonce = b"PS-Msg04"; // exactly 8 bytes
     let (mut ciphertext, tag) = chacha20_poly1305_encrypt_all_64x64(&pair_session.encrypt_key, &nonce, tlv_marshal(&encryptedfields).as_slice(), None);

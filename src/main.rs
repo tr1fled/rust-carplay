@@ -70,7 +70,7 @@ fn main() {
         // Initialize configuration paths
         persister::init_config();
         
-        post_coprocessor("/dev/i2c-2");
+        post_coprocessor("/dev/i2c-3");
         
         // Initialize mdns service
         let mdns = Arc::new(ServiceDaemon::new().expect("Failed to create daemon"));

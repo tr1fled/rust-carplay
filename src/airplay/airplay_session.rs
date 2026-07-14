@@ -19,7 +19,8 @@ pub struct AudioStream {
     pub r#type: u64,
     pub stream_connection_id: String,
     pub unfmt_stream_connection_id: plist::Value,
-    pub control_port: String,
+    pub control_port: Option<u64>,
+    pub data_port: Option<u32>,
     pub audio_format: u64,
     pub audio_type: String,
     pub spf: u64,
@@ -60,19 +61,8 @@ pub struct EventSessionMessage {
 
 #[derive(Debug, Clone)]
 pub struct AirplaySession {
-    // General
-    pub session_uuid: String,
-    pub session_id: String,
-    
     // Clock
     pub airtunes_clock: *mut AirTunesClockRef,
-    
-    // Peer
-    pub peer_ip: String,
-    pub peer_name: String,
-    pub peer_mac_address: String,
-    pub peer_device_id: String,
-    pub peer_timing_port: u64,
     
     // Stream arrays
     pub screen_streams: Vec<Arc<Mutex<ScreenStream>>>,
@@ -84,22 +74,37 @@ pub struct AirplaySession {
     // Comms
     pub event_channel: Option<Sender<EventSessionMessage>>
 }
-impl AirplaySession {
+
+pub struct PeerData {
+    pub session_uuid: String,
+    pub session_id: String,
+
+    pub peer_ip: String,
+    pub peer_name: String,
+    pub peer_mac_address: String,
+    pub peer_device_id: String,
+    pub peer_timing_port: u64,
+}
+
+impl PeerData {
     pub fn new() -> Self {
         Self {
-            // General
             session_uuid: String::from(""),
             session_id: String::from(""),
-            
-            // Clock
-            airtunes_clock: std::ptr::null_mut(),
-            
-            // Peer
             peer_ip: String::from(""),
             peer_name: String::from(""),
             peer_mac_address: String::from(""),
             peer_device_id: String::from(""),
             peer_timing_port: 0,
+        }
+    }
+}
+
+impl AirplaySession {
+    pub fn new() -> Self {
+        Self {
+            // Clock
+            airtunes_clock: std::ptr::null_mut(),
             
             // Stream data
             screen_streams: Vec::new(),
@@ -112,21 +117,6 @@ impl AirplaySession {
             event_channel: None
         }
     }
-    /*pub fn new(session_uuid: String, pn: String, pmac: String, pid: String, ptp: u32) -> Self {
-    Self {
-    // General
-    session_uuid,
-    
-    // Peer
-    peer_name: pn,
-    peer_mac_address: pmac,
-    peer_device_id: pid,
-    peer_timing_port: ptp,
-    
-    // Stream data
-    streams: Vec::new(),
-    }
-    }*/
 }
 
 unsafe impl Send for AirplaySession {}
@@ -144,31 +134,25 @@ pub const kAirPlayStreamType_Screen: u32 = 		  110; // RTP payload type for H.26
 /// * `airplay_session` - Borrowed `AirplaySession` struct wrapped in `Arc<Mutex<>>`
 /// * `response_vody` - Borrowed & mutable Vec<u8> which will be used to write the response body
 /// * `shared_secret` - The shared secret from the pairing session
-pub fn process_streams(streams: Vec<Stream>, airplay_session: &Arc<Mutex<AirplaySession>>, response_body: &mut Vec<u8>, shared_secret: Vec<u8>) {
+pub fn process_streams(peer_ip: String, streams: Vec<Stream>, response_body: &mut Vec<u8>, shared_secret: Vec<u8>, as_ref: Arc<AppSrc>) {
     let mut end_stream_data: Vec<StreamResponse> = vec![];
-    let mut aps = airplay_session.lock().unwrap();
-    {
-        if aps.session_uuid == String::from("") {
-            panic!("Tried to process a stream from a (seemingly) empty AirplaySession.");
-        }
-    };
+    let mut rng = rand::thread_rng();
     // Check if ScreenStream or AudioStream
     for stream in streams {
         match stream {
             Stream::Screen(sst) => {
-                // Push ScreenStream to airplay_session.screen_streams
-                let sc = Arc::new(Mutex::new(sst.clone()));
-                aps.screen_streams.push(Arc::clone(&sc));
-                // lock for reading
-                let streamdata = sc.lock().unwrap();
+                let port = rng.gen_range(1000..=9999);
+                let port_string = port.to_string();
+                let sc_arc = Arc::new(Mutex::new(sst.clone()));
+                let sc_locked = sc_arc.lock().unwrap();
                 let ss = shared_secret.clone();
-                let sci = streamdata.stream_connection_id.clone();
-                let aps = airplay_session.clone();
+                let sci = sc_locked.stream_connection_id.clone();
+                let ac = Arc::clone(&as_ref);
                 thread::Builder::new()
                 .name("screen-recv-server".to_string()) // Set the desired name for the thread
                 .spawn(|| {
                     // This is the code that will run in the new thread
-                    screen::init(ss, 7777.to_string(), sci, aps)
+                    screen::init(ss, port_string, sci, ac)
                 })
                 .expect("Failed to spawn thread");
                 end_stream_data.push(StreamResponse {
@@ -182,32 +166,44 @@ pub fn process_streams(streams: Vec<Stream>, airplay_session: &Arc<Mutex<Airplay
             Stream::Audio(ast) => {
                 // Check what kind of audio stream
                 match ast.r#type {
+                    100 => {
+                        println!("[aps] found main audio!");
+
+                        // If the port numbr exists & is above 0 then execute logic for bidirectional audio
+                        // else execute the logic for audio out
+                        if ast.data_port.is_some() && ast.data_port.unwrap() < 0 {
+                            println!("[aps] [main audio] configuring for bidirectional audio");
+                        } else {
+                            println!("[aps] [main audio] configuring for audio output");
+                        }
+                    },
                     102 => {
-                        let mut rng = rand::thread_rng();
-                        let random_number = rng.gen_range(1000..=9999);
-                        let random_numberc = random_number.clone();
-                        let random_number2 = rng.gen_range(1000..=9999);
-                        let random_number2c = random_number2.clone();
-                        // Push
+                        let data_port = rng.gen_range(1000..=9999);
+                        let rtcp_port = rng.gen_range(1000..=9999);
+                        let data_port_string = data_port.to_string();
+                        let rtcp_port_string = rtcp_port.to_string();
+
+                        // Start a new thread for our main high receiver
                         let a_st = Arc::new(Mutex::new(ast.clone()));
                         let a_st_clone = Arc::clone(&a_st);
-                        aps.audio_streams.push(Arc::clone(&a_st));
                         let ss = shared_secret.clone();
-                        let aps2 = airplay_session.clone();
-                        let acp = ast.control_port.clone();
+                        let acp = ast.control_port.clone().unwrap().to_string();
+                        let pipc = peer_ip.clone();
                         thread::Builder::new()
                         .name("main-high-recv-server".to_string())
                         .spawn(move || {
-                            audio::init(aps2, ss, random_numberc.to_string(), random_number2c.to_string(), acp, a_st_clone)
+                            audio::init(pipc, ss, data_port_string, rtcp_port_string, acp, a_st_clone)
                         })
                         .expect("Failed to spawn thread");
-                        // please fix somebody this code is probably disgusting
+
+                        // Push the stream
                         end_stream_data.push(StreamResponse {
                             r#type: 102,
-                            dataPort: random_number.try_into().unwrap(),
-                            controlPort: Some(random_number2.try_into().unwrap()),
+                            dataPort: data_port.try_into().unwrap(),
+                            controlPort: Some(rtcp_port.try_into().unwrap()),
                             streamConnectionID: Some(ast.unfmt_stream_connection_id)
                         });
+                        println!("[aps] found main high audio!");
                     },
                     _ => {}
                 }

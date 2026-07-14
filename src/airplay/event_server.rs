@@ -1,9 +1,9 @@
-use std::{sync::{Arc, Mutex, mpsc}, time::Duration};
+use std::{sync::{Arc, Mutex, mpsc::{self, Receiver}}, time::Duration};
 use std::io::{Read, Write, ErrorKind::WouldBlock};
 use std::net::{TcpListener, TcpStream};
 use threadpool::ThreadPool;
 use std::thread;
-use crate::{airplay::airplay_session::AirplaySession, networking::http_responders::pair_setup::Session};
+use crate::{airplay::airplay_session::{AirplaySession, EventSessionMessage}, networking::http_responders::pair_setup::Session};
 use crate::networking::http_server::{decrypt_chunk, encrypt_chunk};
 use sha2::{Sha512};
 use hkdf::Hkdf;
@@ -41,16 +41,12 @@ fn encrypt_data(data: Vec<u8>, shared_secret: &Vec<u8>, read_counter: &mut u64) 
     resp_buf
 }
 
-pub fn handle_client(mut stream: TcpStream, shared_secret: Vec<u8>, airplay_session: Arc<Mutex<AirplaySession>>) {
+pub fn handle_client(mut stream: TcpStream, shared_secret: Vec<u8>, rx: Arc<Mutex<Receiver<EventSessionMessage>>>) {
     let mut read_counter: u64 = 0;
     stream.set_nonblocking(true).unwrap();
-    let (sender, receiver) = mpsc::channel();
-    {
-        let mut aps = airplay_session.lock().unwrap();
-        aps.event_channel = Some(sender.clone());
-    }
     loop {
         // incoming data?
+        let receiver = rx.lock().unwrap();
         match receiver.recv() {
             Ok(esm) => {
                 let mut dta = format!("POST /command RTSP/1.0\nAirPlay-Receiver-Device-ID: 242606374384606\nContent-Type: {}\nContent-Length: {}\r\n\r\n", esm.content_type, esm.data.len()).into_bytes();
@@ -99,7 +95,7 @@ pub fn handle_client(mut stream: TcpStream, shared_secret: Vec<u8>, airplay_sess
     }
 }
 
-pub fn init(pair_session: Session, airplay_session: Arc<Mutex<AirplaySession>>) {
+pub fn init(pair_session: Session, rx: Arc<Mutex<Receiver<EventSessionMessage>>>) {
     let listener = TcpListener::bind("0.0.0.0:1337").expect("Failed to initialize Airplay Event Session");
     let pool = ThreadPool::new(4);
     log::info!("Initialized HTTP/RSTP server");
@@ -107,10 +103,9 @@ pub fn init(pair_session: Session, airplay_session: Arc<Mutex<AirplaySession>>) 
     for stream in listener.incoming() {
         let stream = stream.unwrap();
         let ss = pair_session.shared_secret.clone();
-        let aps = Arc::clone(&airplay_session);
-        
+        let rxc = Arc::clone(&rx);
         pool.execute(|| {
-            handle_client(stream, ss, aps);
+            handle_client(stream, ss, rxc);
         });
     }
     log::debug!("ENDED!!!!!!!!!!");

@@ -33,23 +33,15 @@ fn sci_to_u64_string(sci_str: &str) -> String {
 }
 
 /// Handle a single TCP client
-fn handle_client(mut stream: TcpStream, shared_secret: Vec<u8>, sci: String, airplay_session: Arc<Mutex<AirplaySession>>) {
+fn handle_client(mut stream: TcpStream, shared_secret: Vec<u8>, sci: String, ds: Arc<AppSrc>) {
     let mut read_counter: u64 = 0;
     let mut nonce: [u8; 8] = [0; 8];
-    let mut sinkdata: Arc<Mutex<crate::airplay::sinks::gst_gtk4::GstSinkData>>;
-    {
-        sinkdata = airplay_session.lock().unwrap().sink.as_ref().expect("Should be some, but is none? Fatal failure.").clone();
-    }
-    let mut ds: AppSrc =  {
-        let sd = sinkdata.lock().unwrap();
-        sd.data_sink.clone().expect("APPSRC IS NONE! FAIL!")
-    };
     loop {
         let mut header_data = [0; 128];
         let read = match stream.read(&mut header_data) {
             Ok(r) if r > 0 => r,
             Ok(_) => {
-                println!("continuing, there could be an error after this, yes? no? lmk");
+                //println!("continuing, there could be an error after this, yes? no? lmk");
                 continue;
             }, // PIN, PLEASE DONT DO CONTINUE WITHOUT INCREASING BUF
             Err(e) => {
@@ -101,9 +93,9 @@ fn handle_client(mut stream: TcpStream, shared_secret: Vec<u8>, sci: String, air
                 );
                 if ononce == nonce {
                     println!("nonce recovery performed");
-                    nonce = (u64::from_le_bytes(nonce)+1).to_le_bytes();
+                    //nonce = (u64::from_le_bytes(nonce)+1).to_le_bytes();
                 }
-                println!("{:02X?}", &nonce);
+                //println!("{:02X?}", &nonce);
                 
                 if ret != 0 {
                     log::error!("Decryption failed: OSStatus = {}", ret);
@@ -111,8 +103,9 @@ fn handle_client(mut stream: TcpStream, shared_secret: Vec<u8>, sci: String, air
                 }
                 {   
                     // Now safe to push
-                    let apd = avc_to_annexb(body_data);
+                    let apd = avc_to_annexb(&body_data);
                     let buf = Buffer::from_slice(apd);// used to be apd
+
                     match ds.push_buffer(buf) {
                         Ok(_) => (), // do nothing because all went as intended
                         Err(e) => {
@@ -136,7 +129,7 @@ fn handle_client(mut stream: TcpStream, shared_secret: Vec<u8>, sci: String, air
 }
 
 /// Start the TCP listener and spawn threads
-pub fn init(shared_secret: Vec<u8>, port: String, stream_connection_id: String, airplay_session: Arc<Mutex<AirplaySession>>) {
+pub fn init(shared_secret: Vec<u8>, port: String, stream_connection_id: String, as_ref: Arc<AppSrc>) {
     let listener = TcpListener::bind(format!("0.0.0.0:{}", port))
     .expect("Failed to initialize the Screen Stream Receiver");
     let pool = ThreadPool::new(4);
@@ -147,9 +140,9 @@ pub fn init(shared_secret: Vec<u8>, port: String, stream_connection_id: String, 
         let stream = stream.unwrap();
         let ss = shared_secret.clone();
         let sci = stream_connection_id.clone();
-        let aps = airplay_session.clone();
+        let ac = Arc::clone(&as_ref);
         pool.execute(move || {
-            handle_client(stream, ss, sci, aps);
+            handle_client(stream, ss, sci, ac);
         });
     }
 }

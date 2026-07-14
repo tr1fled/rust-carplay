@@ -86,8 +86,8 @@ pub fn avcc_to_annexb(in_avcc: Vec<u8>) -> Vec<u8> {
 /// 
 /// # Returns
 /// * `out_annexb` - `Vec<u8>` with an AnnexB start code (00, 00, 00, 01)
-pub fn avc_to_annexb(in_avc: Vec<u8>) -> Vec<u8> {
-    let mut out_annexb = Vec::new();
+pub fn avc_to_annexb(in_avc: &[u8]) -> Vec<u8> {
+let mut out_annexb = Vec::with_capacity(in_avc.len() + 32);
     let mut i = 0;
     let mut data = in_avc;
 

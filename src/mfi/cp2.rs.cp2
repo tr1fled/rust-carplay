@@ -54,7 +54,6 @@ fn wrapped_write_i2c(dev: &mut LinuxI2CDevice, addr: u8, data: &[u8]) {
     dev.transfer(&mut msg).unwrap();
 }
 
-
 fn wrapped_read_byte(dev: &mut LinuxI2CDevice, register: u8) -> u8 {
     match dev.smbus_read_byte_data(register) {
         Ok(data) => data,

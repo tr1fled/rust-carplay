@@ -1,8 +1,9 @@
 use std::net::{TcpListener, TcpStream};
 use std::io::{Read, Write};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock, mpsc};
 use std::str::Lines;
 use chacha20poly1305::aead::AeadMutInPlace;
+use gst_app::AppSrc;
 use log;
 use crate::airplay::sinks::gst_gtk4::{GstSinkData, init_sink};
 use crate::parsing::http::{
@@ -10,7 +11,7 @@ use crate::parsing::http::{
     HttpRequest,
     HttpResponse,
 };
-use crate::airplay::airplay_session::AirplaySession;
+use crate::airplay::airplay_session::{AirplaySession, PeerData};
 use crate::networking::{
     http_responders::{
         pair_setup::{handle_pair_setup, Session},
@@ -82,14 +83,8 @@ pub fn encrypt_chunk(write_key: &[u8; 32], data: &[u8], count: &mut u64) -> Resu
 
 fn handle_client(mut stream: TcpStream) {
     let mut pair_session: Session = Session::new();
-    let mut airplay_session = Arc::new(Mutex::new(AirplaySession::new()));
-    let mut sinkdata = Arc::new(Mutex::new(GstSinkData::new()));
-    {
-        let mut aps = airplay_session.lock().unwrap();
-        let sdc = sinkdata.clone();
-        aps.sink = Some(sdc);
-    }
-    let mut csd = sinkdata.clone();
+    let mut appsource:  Arc<AppSrc>;
+    let mut peer_data = Arc::new(RwLock::new(PeerData::new()));
     gst::init().unwrap();
     // right after gst is initialized, we will define the appsrc
     { 
@@ -97,15 +92,19 @@ fn handle_client(mut stream: TcpStream) {
         .field("stream-format", "byte-stream") // <-- AnnexB
         .field("alignment", "nal")
         .build();
-        let mut data = csd.lock().unwrap();
-        data.data_sink = Some(gst_app::AppSrc::builder()
+        appsource = Arc::new(gst_app::AppSrc::builder()
         .caps(&caps)
         .format(gst::Format::Time)
         .build());
     }
-    let aps = airplay_session.clone();
+    let (evs_sender, evs_receiver) = mpsc::channel();
+
+    let mut evs_receiver_mutex = Arc::new(Mutex::new(evs_receiver));
+
+    let evs_sender_arc = Arc::new(evs_sender);
+    let appsrc_arc = Arc::clone(&appsource);
     thread::spawn(move || {
-        init_sink(aps)
+        init_sink(evs_sender_arc, appsrc_arc)
     });
     match stream.peer_addr() {
         Ok(peer_ip) => {
@@ -114,8 +113,7 @@ fn handle_client(mut stream: TcpStream) {
                 Some((ip, _)) => pip=ip.to_string(),
                 None => panic!("Failed to split IP")
             };
-            airplay_session.lock().unwrap().peer_ip = pip.clone();
-            sinkdata.lock().unwrap().peer_ip = pip.clone();
+            peer_data.write().unwrap().peer_ip = pip;
         },
         Err(error) => panic!("[FIXED LATER (FIXME)] Failed to get the peer's IP address. The server cannot live on unless fixed: {}", error)
     }
@@ -172,7 +170,7 @@ fn handle_client(mut stream: TcpStream) {
         // Start checking paths
         if request_data.method == "SETUP" {
             // Handle SETUP request
-            response_data = handle_setup(&mut request_data, &mut pair_session, &airplay_session);
+            response_data = handle_setup(&mut request_data, &mut pair_session, Arc::clone(&peer_data), Arc::clone(&evs_receiver_mutex), Arc::clone(&appsource));
         } else if request_data.method == "RECORD" {
             // Handle RECORD request
             response_data = handle_record(request_data);

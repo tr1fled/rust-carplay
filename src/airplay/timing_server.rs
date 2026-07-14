@@ -7,9 +7,10 @@
 
 // what do you think, could this code be tim apple certified©️?
 
+use crate::airplay::airplay_session::PeerData;
 use crate::timing::bindings::{AirTunesClockRef, AirTunesClock_GetSynchronizedTime, AirTunesTime};
 use crate::{airplay::airplay_session::AirplaySession, networking::http_responders::pair_setup::Session, timing::bindings};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::net::UdpSocket;
 use std::io;
 use log;
@@ -19,16 +20,18 @@ use std::time::Duration;
 // thanks timmy apple for your beautiful constant which i just stole
 const kNTPvsUnixSeconds: u32 = 2208988800;
 
-pub fn init(pair_session: Session, airplay_session: Arc<Mutex<AirplaySession>>, airtunes_clock: AirTunesClockRef) {
+pub fn init(pair_session: Session, peer_data: Arc<RwLock<PeerData>>, airtunes_clock: AirTunesClockRef) {
     println!("hello to the timing server");
     // Bind socket to port 7000
-    let socket = UdpSocket::bind("0.0.0.0:7000").expect("Failed to");
-    log::info!("UDP timing socket opened on: 0.0.0.0:7000");
+    let socket = UdpSocket::bind("0.0.0.0:7060").expect("Failed to");
+    log::info!("UDP timing socket opened on: 0.0.0.0:7060");
     println!("opened");
     let mut ip = String::new();
     {
         // copy the data to read without further locking
-        let mut aps = airplay_session.lock().unwrap();
+        println!("ts: locking aps");
+        let mut aps = peer_data.read().unwrap();
+        println!("ts: locked aps");
         aps.peer_ip.clone_into(&mut ip);
         println!("THY PORT WHERE WE WILL BE SENDING THEE DATA IS AS FOLLOWS: {}", &aps.peer_timing_port.to_string());
         ip = format!("{}:{}", ip, aps.peer_timing_port.to_string());

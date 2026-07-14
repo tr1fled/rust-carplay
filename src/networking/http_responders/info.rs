@@ -31,26 +31,26 @@ struct info_scheme_rsp {
     audioFormats: Vec<AudioFmtData>,
     extendedFeatures: Vec<String>,
     statusFlags: u64,
-    //bluetoothIDs: Vec<String>,
+    bluetoothIDs: Vec<String>,
     deviceID: String,
     displays: Vec<ScreenData>,
     hidDevices: Vec<TouchscreenData>,
     sourceVersion: String,
     features: u64,
-    //firmwareRevision: String,
-    //hardwareRevision: String,
+    firmwareRevision: String,
+    hardwareRevision: String,
     //hidLanguages: Vec<MultiTyper>,
-    //manufacturer: String,
-    //modes: Vec<MultiTyper>,
+    manufacturer: String,
+    modes: Modes,
     name: String,
     nightMode: bool,
     //oemIcon: plist::Data,
     //oemIcons: Vec<u8>,
     //oemIconLabel: String, 
     //oemIconVisible: bool, // uncomment above if set to true, but since it is false...
-    //OSInfo: String,
-    //protocolVersion: String,
-    //rightHandDrive: bool,
+    OSInfo: String,
+    protocolVersion: String,
+    rightHandDrive: bool,
     //vehicleInformation: Vec<MultiTyper>,
     //appearanceDefault: String,
     //buttonInfo: Vec<MultiTyper>,
@@ -74,6 +74,7 @@ struct TouchscreenData {
 }
 #[derive(Serialize)]
 struct ScreenData {
+    r#type: u64,
     maxFPS: u64,
     widthPixels: u64,
     primaryInputDevice: u8,
@@ -82,6 +83,28 @@ struct ScreenData {
     uuid: String,
     widthPhysical: u64,
     features: u64,
+}
+#[derive(Serialize)]
+struct ModeResource {
+    resourceID: u64,
+    transferType: u64,
+    transferPriority: u64,
+    takeConstraint: u64,
+    borrowConstraint: u64,
+    unborrowConstraint: u64
+}
+#[derive(Serialize)]
+struct ModeAppState {
+    appStateID: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    state: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    speechMode: Option<i64>,
+}
+#[derive(Serialize)]
+struct Modes {
+    resources: Vec<ModeResource>,
+    appStates: Vec<ModeAppState>
 }
 
 impl info_scheme_rsp {
@@ -95,48 +118,84 @@ impl info_scheme_rsp {
             audioFormats: populate_audio_formats(),
             extendedFeatures: vec![
                 String::from("vocoderInfo"),
-                String::from("theUpdatePushed!"),
             ],
             statusFlags: 1 << 2,
-            /*bluetoothIDs: vec![
+            bluetoothIDs: vec![
                 String::from("c0:d0:12:87:6a:49")
-            ],*/
+            ],
             deviceID: String::from("DC:A6:32:C3:F3:DE"),
             displays: vec![ScreenData {
-                features: 30,
+                features: 0,
+                r#type: 110,
                 maxFPS: 60,
                 heightPhysical: 0,
-                widthPhysical: 0,//
+                widthPhysical: 0,
                 heightPixels: 720,
                 widthPixels: 1280,
-                uuid: String::from("a5f7a68d-7b0f-4305-984b-974f677a150b"),
-                primaryInputDevice: 0,
+                uuid: String::from("a5f7a68d-7b0f-4305-984b-974f677a150h"),
+                primaryInputDevice: 0x01,
             }],
             hidDevices: vec![TouchscreenData {
-                hidProductID: 0,
+                hidProductID: 1,
                 hidCountryCode: 0,
                 uuid: String::from("e5f7a68d-7b0f-4305-984b-974f677a150b"),
                 hidDescriptor: Value::Data(hid_touchscreen_single_descriptor(1280, 720)),
-                displayUUID: String::from("a5f7a68d-7b0f-4305-984b-974f677a150b"),
-                hidVendorID: 0,
+                displayUUID: String::from("a5f7a68d-7b0f-4305-984b-974f677a150h"),
+                hidVendorID: 2,
                 name: String::from("Touch Screen"),
             }],
-            sourceVersion: String::from("320.17"),
-            features: 416679199360,
-            //firmwareRevision: String::from("rust-carplay0.1"),
-            //hardwareRevision: String::from("rust-carplay0.1"),
+            sourceVersion: String::from("490.0"),
+            features: 418060152546,
+            firmwareRevision: String::from("rust-carplay0.1"),
+            hardwareRevision: String::from("rust-carplay0.1"),
             //hidLanguages: vec![],
-            //manufacturer: String::from("Luixiuno"),
-            //modes: vec![],
+            manufacturer: String::from("Luixiuno"),
+            modes: Modes {
+                resources: vec![
+                    ModeResource {
+                        resourceID: 1,
+                        transferType: 1,
+                        transferPriority: 100,
+                        takeConstraint: 100,
+                        borrowConstraint: 100,
+                        unborrowConstraint: 100
+                    },
+                    ModeResource {
+                        resourceID: 2,
+                        transferType: 1,
+                        transferPriority: 100,
+                        takeConstraint: 100,
+                        borrowConstraint: 100,
+                        unborrowConstraint: 100
+                    }
+                ],
+                appStates: vec![
+                    ModeAppState {
+                        appStateID: 2,
+                        state: Some(false),
+                        speechMode: None
+                    },
+                    ModeAppState {
+                        appStateID: 1,
+                        state: None,
+                        speechMode: Some(-1)
+                    },
+                    ModeAppState {
+                        appStateID: 3,
+                        state: Some(false),
+                        speechMode: None
+                    },
+                ]
+            },
             name: String::from("CarPlay"),
             nightMode: false,
             //oemIcon: plist::Data::new(fs::read("tux.png").unwrap()),
             //oemIcons: Vec<u8>,
             //oemIconLabel: String::from("rust-carplay"), 
             //oemIconVisible: true, // uncomment above if set to true, but since it is false...
-            //OSInfo: String::from("Linux 6.12.34"),
-            //protocolVersion: String::from("1.0"),
-            //rightHandDrive: false,
+            OSInfo: String::from("Linux 6.12.34"),
+            protocolVersion: String::from("1.0"),
+            rightHandDrive: false,
             //vehicleInformation: vec![],
             //appearanceDefault: String,
             //buttonInfo: vec![],
@@ -216,7 +275,7 @@ pub fn handle_info(request_data: HttpRequest, pair_session: &mut Session) -> Htt
     for byte in &body {
         print!("0x{:02X}, ", byte);
     }
-    println!();
+    println!("{:#?}", request_data);
     //println!("{:#?}", req_parsed_2);
     log::info!("↗️  HTTP Server / Sending /info response");
     HttpResponse { 

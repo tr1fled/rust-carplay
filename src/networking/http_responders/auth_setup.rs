@@ -11,7 +11,7 @@ use std::io::{Read, Write};
 use std::{os::raw::c_void, process::ExitStatus, ptr};
 use log;
 use rand::{rngs::OsRng, RngCore};
-use sha2::{Sha512};
+use sha2::{Sha256, Sha512};
 use sha1::{Digest, Sha1};
 use hkdf::Hkdf;
 use x25519_dalek::{PublicKey, StaticSecret};
@@ -154,6 +154,7 @@ fn handle_m1(data: Vec<u8>, pair_session: &mut Session) -> Vec<u8> {
         println!("fin");
     }
     let mut aes_key_ptr = aes_key.as_mut_ptr();
+    
     // get AES IV
     let mut aes_iv = [0u8; 20];
     unsafe {
@@ -163,11 +164,14 @@ fn handle_m1(data: Vec<u8>, pair_session: &mut Session) -> Vec<u8> {
         SHA1_Update(sha1_ctx.as_mut_ptr(), shared_secret.to_bytes().as_ptr() as *const c_void, shared_secret.to_bytes().len());
         SHA1_Final(aes_iv.as_mut_ptr(), sha1_ctx.as_mut_ptr());
     }
+
     let mut aes_iv_ptr = aes_iv.as_mut_ptr();
+
     // our pk + peer pk
-    let mut hasher = Sha1::new();
+    let mut hasher = Sha256::new();
     hasher.update(&host_public.to_bytes());
     hasher.update(&peer_ec_pk);
+
     let mut sig_in = vec![0u8; 20];
     unsafe {
         println!("Beginning SHA1 PK HOST+PEER process");
@@ -176,9 +180,10 @@ fn handle_m1(data: Vec<u8>, pair_session: &mut Session) -> Vec<u8> {
         SHA1_Update(sha1_ctx.as_mut_ptr(), peer_ec_pk.as_ptr() as *const c_void, peer_ec_pk.len());
         SHA1_Final(sig_in.as_mut_ptr(), sha1_ctx.as_mut_ptr());
     }
+
     // sign with mfi
     let cert = ret_cp_pubkey(pair_session.i2c_device.clone());
-    let mut signature = cp2::rsa_sign(pair_session.i2c_device.clone(), &sig_in).expect("Error signing with MFi");
+    let mut signature = cp2::rsa_sign(pair_session.i2c_device.clone(), &hasher.finalize()).expect("Error signing with MFi");
     let mut signature_out = vec![0u8; signature.len()];
     unsafe {
         println!("Beginning AES process");

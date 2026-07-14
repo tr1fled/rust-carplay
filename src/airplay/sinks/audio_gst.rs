@@ -26,17 +26,24 @@ pub fn init_sink(in_stream: Arc<Mutex<AudioStream>>) {
     .build();
     appsrc.set_property("format", &gst::Format::Time);
     appsrc.set_property("is-live", &true);
-    appsrc.set_property("do-timestamp", &true);
+    appsrc.set_property("do-timestamp", &false);
     {
         let mut is = in_stream.lock().unwrap(); 
         is.sink = Some(appsrc.clone()); 
         is.pipeline = Some(pipeline.clone());
     }
+    let queue = gst::ElementFactory::make("queue")
+    .build()
+    .unwrap();
+    queue.set_property_from_str("leaky", "downstream");
+    queue.set_property("max-size-buffers", 0u32);
+    queue.set_property("max-size-time", 500000000u64);
+    queue.set_property("max-size-bytes", 0u32);
     // faad ! audioconvert ! audioresample ! autoaudiosink
     let aacparse = gst::ElementFactory::make("aacparse")
     .build()
     .unwrap();
-    let faad = gst::ElementFactory::make("faad")
+    let faad = gst::ElementFactory::make("avdec_aac")
     .build()
     .unwrap();
     let convert = gst::ElementFactory::make("audioconvert")
@@ -48,8 +55,8 @@ pub fn init_sink(in_stream: Arc<Mutex<AudioStream>>) {
     let sink = gst::ElementFactory::make("autoaudiosink")
     .build()
     .unwrap();  
-    pipeline.add_many([appsrc.upcast_ref(), &aacparse, &faad, &convert, &audioresample, &sink]).unwrap();
-    gst::Element::link_many([appsrc.upcast_ref(), &aacparse, &faad, &convert, &audioresample, &sink]).unwrap();
+    pipeline.add_many([appsrc.upcast_ref(), &queue, &aacparse, &faad, &convert, &audioresample, &sink]).unwrap();
+    gst::Element::link_many([appsrc.upcast_ref(), &queue, &aacparse, &faad, &convert, &audioresample, &sink]).unwrap();
     pipeline
     .set_state(gst::State::Playing)
     .expect("Unable to set the pipeline to the `Playing` state");

@@ -17,6 +17,7 @@ pub fn handle_record(request_data: HttpRequest) -> HttpResponse {
         Err(e) => panic!("Fatal! Error while trying to fetch the Pairing Identity, \"{}\". While the program can go on, it is a good practice to fix this.", e),
     }
     //let value = plist::to_writer_binary(&mut body, &info_scheme_rsp::new(String::from_utf8(pairing_identity).expect("Failed to convert Vec to String")));
+    println!("{:#?}", request_data);
     for byte in &body {
         print!("0x{:02X}, ", byte);
     }
