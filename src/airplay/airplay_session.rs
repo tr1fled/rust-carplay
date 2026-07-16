@@ -1,4 +1,4 @@
-use std::{io::Cursor, sync::{Arc, Mutex, mpsc::Sender}};
+use std::{io::Cursor, sync::{Arc, Mutex, mpsc::Sender}, time::Duration};
 use std::thread;
 use crate::airplay::sinks::gst_gtk4::{GstSinkData};
 use crate::airplay::stream_processors::{
@@ -157,7 +157,7 @@ pub fn process_streams(peer_ip: String, streams: Vec<Stream>, response_body: &mu
                 .expect("Failed to spawn thread");
                 end_stream_data.push(StreamResponse {
                     r#type: 110,
-                    dataPort: 7777,
+                    dataPort: port.try_into().unwrap(),
                     controlPort: None,
                     streamConnectionID: None,
                 });

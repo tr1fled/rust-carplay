@@ -4,14 +4,16 @@ use log;
 use uuid::Uuid;
 use crate::persister::{self, CFG_PAIRING_IDENTITY};
 
-pub fn discover(mdns: Arc<ServiceDaemon>, callback: fn(Box<ResolvedService>)) {
+pub fn discover(mdns: Arc<ServiceDaemon>, callback: fn(Box<ResolvedService>) -> bool) {
     let receiver = mdns.browse("_carplay-ctrl._tcp.local.").expect("Failed to browse");
     log::info!("Started discovering _carplay-ctrl._tcp.local. with mDNS");
     while let Ok(event) = receiver.recv() {
         match event {
             ServiceEvent::ServiceResolved(info) => {
                 log::info!("Resolved a new service: {}\n host: {}\n port: {}", info.fullname, info.host, info.port);
-                callback(info);
+                if callback(info) == true {
+                    return;
+                }
             }
             other_event => {
                 log::debug!("{:?}", other_event);
@@ -24,7 +26,7 @@ pub fn advertise(mdns: Arc<ServiceDaemon>) {
     // Create a service info.
     log::trace!("Registering Airplay server via mDNS");
     let service_type = "_airplay._tcp.local.";
-    let instance_name = "cp";
+    let instance_name = "CarPlay";
     let ip = "192.168.42.1";
     let service_hostname = "192.168.42.1.local.";
     let port = 7000;
@@ -36,7 +38,7 @@ pub fn advertise(mdns: Arc<ServiceDaemon>) {
         }
     }
     let properties = [
-        ("deviceid", "DC:A6:32:C3:F3:DE"),
+        ("deviceid", "dc:a6:32:c3:f3:de"),
         ("features", "0x4040280,0x61"),
         //("features", "0x4040280,0x21"),
         ("flags", "0x29a404"),

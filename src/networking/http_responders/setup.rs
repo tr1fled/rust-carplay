@@ -59,16 +59,8 @@ pub fn handle_setup(request_data: &mut HttpRequest, pair_session: &mut Session, 
                 panic!("Error while creating AirTunes Clock: {}", err);
             }
         }
-        plist::to_writer_binary(&mut response_body, &req_setup_data {
-            eventPort: 1337,
-            enabledFeatures: vec![
-                //String::from("altScreen"),
-            ],
-            keepAlivePort: 1338,
-            timingPort: 7060,
-        }).expect("Failed to create a binary plist");
-        println!("{}", String::from_utf8_lossy(&response_body.as_slice()));
-
+        println!("atc created");
+        
         let ps = pair_session.clone();
         let pd = Arc::clone(&peer_data);
         let clock_wrapper = airtunes_clock;
@@ -86,6 +78,16 @@ pub fn handle_setup(request_data: &mut HttpRequest, pair_session: &mut Session, 
         .spawn(|| {
             airplay::event_server::init(ps, rx_arc);
         }).unwrap();
+        
+        plist::to_writer_binary(&mut response_body, &req_setup_data {
+            eventPort: 1337,
+            enabledFeatures: vec![
+                //String::from("altScreen"),
+            ],
+            keepAlivePort: 1338,
+            timingPort: 7060,
+        }).expect("Failed to create a binary plist");
+        println!("{}", String::from_utf8_lossy(&response_body.as_slice()));
     } else {
         println!("Now we have streams to process, sending them to the stream processor...");
         let streams = req_parsed.as_dictionary().and_then(|dict| dict.get("streams")).expect("Failed to fetch streams").as_array().expect("Failed to fetch streams as array");

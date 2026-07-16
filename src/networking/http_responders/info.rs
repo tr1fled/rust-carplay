@@ -123,7 +123,7 @@ impl info_scheme_rsp {
             bluetoothIDs: vec![
                 String::from("c0:d0:12:87:6a:49")
             ],
-            deviceID: String::from("DC:A6:32:C3:F3:DE"),
+            deviceID: String::from("DC:A6:32:C3:F3:DF"),
             displays: vec![ScreenData {
                 features: 0,
                 r#type: 110,

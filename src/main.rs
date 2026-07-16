@@ -97,7 +97,7 @@ fn main() {
         loop {sleep(Duration::from_secs(1));};
     }
     
-fn start_session(info: Box<ResolvedService>) {
+fn start_session(info: Box<ResolvedService>) -> bool {
         let mut ip: Option<String> = None;
         
         for addr in info.addresses.iter() {
@@ -120,6 +120,8 @@ fn start_session(info: Box<ResolvedService>) {
         
         if let Some(ip) = ip {
             networking::http_client::control_command(ip, info.host.to_string());
+            return false;
         }
+        return false;
     }
     

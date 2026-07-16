@@ -172,18 +172,10 @@ fn handle_m1(data: Vec<u8>, pair_session: &mut Session) -> Vec<u8> {
     hasher.update(&host_public.to_bytes());
     hasher.update(&peer_ec_pk);
 
-    let mut sig_in = vec![0u8; 20];
-    unsafe {
-        println!("Beginning SHA1 PK HOST+PEER process");
-        SHA1_Init(sha1_ctx.as_mut_ptr());
-        SHA1_Update(sha1_ctx.as_mut_ptr(), host_public.to_bytes().as_ptr() as *const c_void, host_public.to_bytes().len());
-        SHA1_Update(sha1_ctx.as_mut_ptr(), peer_ec_pk.as_ptr() as *const c_void, peer_ec_pk.len());
-        SHA1_Final(sig_in.as_mut_ptr(), sha1_ctx.as_mut_ptr());
-    }
-
     // sign with mfi
     let cert = ret_cp_pubkey(pair_session.i2c_device.clone());
     let mut signature = cp2::rsa_sign(pair_session.i2c_device.clone(), &hasher.finalize()).expect("Error signing with MFi");
+    println!("debug cert (auth-setup):\n\ncert: {:#?}\ncert_len: {:#?}", cert, cert.len());
     let mut signature_out = vec![0u8; signature.len()];
     unsafe {
         println!("Beginning AES process");
