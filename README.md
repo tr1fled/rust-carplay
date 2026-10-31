@@ -24,5 +24,8 @@ I am a beginner rust programmer, I tried to make it look somewhat simple, my sol
 
 I hope I never have to use GPT again for coding...
 
+## Liability
+This is a snippet which barely works, it takes a loooot of work to get running, but it's a basic skeleton, development had begun about a year ago, and was paused around 6 months ago. Development has begun on a way more stable version of this called longplay, hopefully in full rust.
+
 ## Credits
-* [hbouhadji](https://github.com/hbouhadji) for helping with steering me towards the right path, also for the MFi bypass
+* [hbouhadji](https://github.com/hbouhadji) for helping with steering me towards the right path, also for the MFi bypass 
